@@ -180,11 +180,12 @@ export async function createDailyContent(data: {
   image_url: string;
   date: string;
 }): Promise<DailyContent> {
+  const id = generateId();
   const res = await query<DailyContent>(
-    `INSERT INTO daily_contents (user_id, text, image_url, date)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO daily_contents (id, user_id, text, image_url, date)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING *`,
-    [data.user_id, data.text, data.image_url, data.date]
+    [id, data.user_id, data.text, data.image_url, data.date]
   );
   return res.rows[0];
 }
@@ -257,11 +258,12 @@ export async function createFeedback(data: {
   content_id: string;
   rating: string;
 }): Promise<Feedback> {
+  const id = generateId();
   const res = await query<Feedback>(
-    `INSERT INTO feedback (content_id, rating)
-     VALUES ($1, $2)
+    `INSERT INTO feedback (id, content_id, rating)
+     VALUES ($1, $2, $3)
      RETURNING *`,
-    [data.content_id, data.rating]
+    [id, data.content_id, data.rating]
   );
   return res.rows[0];
 }
@@ -279,11 +281,12 @@ export async function createUserPhoto(data: {
   user_id: string;
   photo_url: string;
 }): Promise<UserPhoto> {
+  const id = generateId();
   const res = await query<UserPhoto>(
-    `INSERT INTO user_photos (user_id, photo_url)
-     VALUES ($1, $2)
+    `INSERT INTO user_photos (id, user_id, photo_url)
+     VALUES ($1, $2, $3)
      RETURNING *`,
-    [data.user_id, data.photo_url]
+    [id, data.user_id, data.photo_url]
   );
   return res.rows[0];
 }
@@ -315,11 +318,12 @@ export async function createContentGeneration(data: {
   user_id: string;
   generated_date: string;
 }): Promise<ContentGeneration> {
+  const id = generateId();
   const res = await query<ContentGeneration>(
-    `INSERT INTO content_generations (user_id, generated_date)
-     VALUES ($1, $2)
+    `INSERT INTO content_generations (id, user_id, generated_date)
+     VALUES ($1, $2, $3)
      RETURNING *`,
-    [data.user_id, data.generated_date]
+    [id, data.user_id, data.generated_date]
   );
   return res.rows[0];
 }
