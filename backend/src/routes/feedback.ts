@@ -1,6 +1,5 @@
 import { Router, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { prisma } from '../models/database';
+import { getFeedbackByContentId, createFeedback, verifyContentOwnership } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -24,40 +23,29 @@ router.post('/', async (req: AuthRequest, res: Response) => {
 
   try {
     // Verify the content belongs to the user
-    const content = await prisma.dailyContent.findFirst({
-      where: {
-        id: content_id,
-        user_id: userId
-      },
-      select: { id: true }
-    });
+    const ownsContent = await verifyContentOwnership(content_id, userId);
 
-    if (!content) {
+    if (!ownsContent) {
       return res.status(404).json({ error: 'Content not found' });
     }
 
     // Check if feedback already exists
-    const existingFeedback = await prisma.feedback.findUnique({
-      where: { content_id }
-    });
+    const existingFeedback = await getFeedbackByContentId(content_id);
 
     if (existingFeedback) {
-      // Update existing feedback
-      await prisma.feedback.update({
-        where: { content_id },
-        data: { rating }
-      });
-    } else {
-      // Insert new feedback
-      const feedbackId = uuidv4();
-      await prisma.feedback.create({
-        data: {
-          id: feedbackId,
-          content_id,
-          rating
-        }
-      });
+      // Update existing feedback - we need to delete and recreate since we don't have an update function
+      const { pool } = await import('../models/database');
+      await pool.query(
+        'DELETE FROM feedback WHERE content_id = $1',
+        [content_id]
+      );
     }
+
+    // Insert new feedback
+    await createFeedback({
+      content_id,
+      rating
+    });
 
     res.json({ success: true });
   } catch (error) {
@@ -73,22 +61,13 @@ router.get('/:content_id', async (req: AuthRequest, res: Response) => {
 
   try {
     // Verify the content belongs to the user
-    const content = await prisma.dailyContent.findFirst({
-      where: {
-        id: contentId,
-        user_id: userId
-      },
-      select: { id: true }
-    });
+    const ownsContent = await verifyContentOwnership(contentId, userId);
 
-    if (!content) {
+    if (!ownsContent) {
       return res.status(404).json({ error: 'Content not found' });
     }
 
-    const feedback = await prisma.feedback.findUnique({
-      where: { content_id: contentId },
-      select: { rating: true }
-    });
+    const feedback = await getFeedbackByContentId(contentId);
 
     if (!feedback) {
       return res.status(404).json({ error: 'Feedback not found' });

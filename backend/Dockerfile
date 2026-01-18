@@ -1,17 +1,13 @@
-# Build stage - use Debian for consistent OpenSSL support
+# Build stage - use Debian for OpenSSL support
 FROM node:20-slim AS builder
 
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-COPY prisma ./prisma/
 
-# Install dependencies
+# Install all dependencies
 RUN npm ci
-
-# Generate Prisma client
-RUN npx prisma generate
 
 # Copy source code
 COPY . .

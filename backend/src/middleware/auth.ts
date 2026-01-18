@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../models/database';
+import { getUserById } from '../models/database';
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -21,10 +21,7 @@ export async function authenticateToken(req: AuthRequest, res: Response, next: N
     const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
 
     // Verify user exists
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: { id: true }
-    });
+    const user = await getUserById(decoded.userId);
 
     if (!user) {
       return res.status(403).json({ error: 'User not found' });

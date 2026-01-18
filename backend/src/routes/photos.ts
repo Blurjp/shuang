@@ -1,6 +1,5 @@
 import { Router, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { prisma } from '../models/database';
+import { getUserPhotos, createUserPhoto, deactivateUserPhoto } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import multer from 'multer';
 import { uploadPhoto as uploadToStorage, deletePhoto as deleteFromStorage, isStorageConfigured } from '../services/storage';
@@ -47,14 +46,9 @@ router.post('/upload', photoUploadRateLimit, upload.single('photo'), async (req:
     );
 
     // Store reference in database
-    const photoId = uuidv4();
-    const photo = await prisma.userPhoto.create({
-      data: {
-        id: photoId,
-        user_id: userId,
-        photo_url: photoUrl,
-        is_active: 1
-      }
+    const photo = await createUserPhoto({
+      user_id: userId,
+      photo_url: photoUrl
     });
 
     res.json({
@@ -73,20 +67,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
   const userId = req.userId!;
 
   try {
-    const photos = await prisma.userPhoto.findMany({
-      where: {
-        user_id: userId,
-        is_active: 1
-      },
-      orderBy: {
-        created_at: 'desc'
-      },
-      select: {
-        id: true,
-        photo_url: true,
-        created_at: true
-      }
-    });
+    const photos = await getUserPhotos(userId);
 
     res.json(photos);
   } catch (error) {
@@ -102,12 +83,8 @@ router.delete('/:photoId', async (req: AuthRequest, res: Response) => {
 
   try {
     // Verify photo belongs to user
-    const photo = await prisma.userPhoto.findFirst({
-      where: {
-        id: photoId,
-        user_id: userId
-      }
-    });
+    const photos = await getUserPhotos(userId);
+    const photo = photos.find(p => p.id === photoId);
 
     if (!photo) {
       return res.status(404).json({ error: 'Photo not found' });
@@ -121,10 +98,7 @@ router.delete('/:photoId', async (req: AuthRequest, res: Response) => {
     }
 
     // Soft delete from database
-    await prisma.userPhoto.update({
-      where: { id: photoId },
-      data: { is_active: 0 }
-    });
+    await deactivateUserPhoto(photoId);
 
     res.json({ success: true });
   } catch (error) {

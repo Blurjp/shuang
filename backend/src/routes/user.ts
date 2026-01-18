@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { prisma, User } from '../models/database';
+import { getUserById, updateUser } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -28,14 +28,11 @@ router.post('/onboarding', async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        gender,
-        genre_preference,
-        emotion_preference,
-        is_onboarded: 1
-      }
+    await updateUser(userId, {
+      gender,
+      genre_preference,
+      emotion_preference,
+      is_onboarded: 1
     });
 
     res.json({ success: true });
@@ -50,14 +47,7 @@ router.get('/preferences', async (req: AuthRequest, res: Response) => {
   const userId = req.userId!;
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        gender: true,
-        genre_preference: true,
-        emotion_preference: true
-      }
-    });
+    const user = await getUserById(userId);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -105,10 +95,7 @@ router.put('/preferences', async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'No fields to update' });
     }
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: updateData
-    });
+    await updateUser(userId, updateData);
 
     res.json({ success: true });
   } catch (error) {
@@ -135,10 +122,7 @@ router.post('/push-token', async (req: AuthRequest, res: Response) => {
       ? { push_token_ios: token }
       : { push_token_android: token };
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: updateData
-    });
+    await updateUser(userId, updateData);
 
     res.json({ success: true });
   } catch (error) {

@@ -8,13 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "db:init": "tsx src/utils/initDb.ts",
-    "worker": "tsx src/worker/index.ts",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:migrate:deploy": "prisma migrate deploy",
-    "prisma:studio": "prisma studio",
-    "prisma:seed": "tsx prisma/seed.ts",
-    "postinstall": "prisma generate"
+    "worker": "tsx src/worker/index.ts"
   },
   "keywords": [
     "daily-protagonist",
@@ -26,8 +20,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.971.0",
     "@aws-sdk/s3-request-presigner": "^3.971.0",
-    "@prisma/client": "^5.22.0",
     "@types/multer": "^2.0.0",
+    "@types/pg": "^8.16.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.6.0",
     "cors": "^2.8.5",
@@ -37,7 +31,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
-    "prisma": "^5.22.0",
+    "pg": "^8.17.1",
     "uuid": "^13.0.0",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0"

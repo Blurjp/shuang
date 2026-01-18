@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { prisma } from '../models/database';
+import { getUserByEmail, getUserByAnonymousId, createUser } from '../models/database';
 import { generateToken } from '../middleware/auth';
 import { authRateLimit } from '../middleware/rateLimit';
 
@@ -17,47 +16,39 @@ router.post('/register', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Email or anonymous_id is required' });
   }
 
-  let userId: string;
-
   try {
+    let userId: string;
+    let token: string;
+
     if (email) {
       // Check if user exists
-      const existingUser = await prisma.user.findUnique({
-        where: { email },
-        select: { id: true }
-      });
+      const existingUser = await getUserByEmail(email);
 
       if (existingUser) {
         // User exists, return token
-        const token = generateToken(existingUser.id);
+        token = generateToken(existingUser.id);
         return res.json({ user_id: existingUser.id, token });
       }
 
       // Create new user with email
-      userId = uuidv4();
-      await prisma.user.create({
-        data: { id: userId, email }
-      });
+      const newUser = await createUser({ email });
+      userId = newUser.id;
+      token = generateToken(userId);
     } else {
       // Check if anonymous user exists
-      const existingUser = await prisma.user.findUnique({
-        where: { anonymous_id },
-        select: { id: true }
-      });
+      const existingUser = await getUserByAnonymousId(anonymous_id!);
 
       if (existingUser) {
-        const token = generateToken(existingUser.id);
+        token = generateToken(existingUser.id);
         return res.json({ user_id: existingUser.id, token });
       }
 
       // Create new anonymous user
-      userId = uuidv4();
-      await prisma.user.create({
-        data: { id: userId, anonymous_id }
-      });
+      const newUser = await createUser({ anonymous_id });
+      userId = newUser.id;
+      token = generateToken(userId);
     }
 
-    const token = generateToken(userId);
     res.json({ user_id: userId, token });
   } catch (error) {
     console.error('Registration error:', error);
@@ -74,10 +65,7 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { email },
-      select: { id: true }
-    });
+    const user = await getUserByEmail(email);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });

@@ -1,6 +1,5 @@
 import { Router, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { prisma, ContentWithFeedback } from '../models/database';
+import { getUserById, getDailyContent, createDailyContent, getContentGeneration, createContentGeneration, getUserPhotos, getDailyContentsBeforeDate, getDailyContentByIdAndUser } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { contentGenerator } from '../services/contentGenerator';
 import { contentGenerationRateLimit } from '../middleware/rateLimit';
@@ -18,28 +17,11 @@ router.get('/today', async (req: AuthRequest, res: Response) => {
   console.log(`[DEBUG] Getting today's content for userId: ${userId}, date: ${today}`);
 
   try {
-    const content = await prisma.dailyContent.findUnique({
-      where: {
-        user_id_date: {
-          user_id: userId,
-          date: today
-        }
-      },
-      include: {
-        feedback: {
-          select: {
-            rating: true
-          }
-        }
-      }
-    });
+    const content = await getDailyContent(userId, today);
 
     if (!content) {
       // Check user's generation status
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { is_premium: true }
-      });
+      const user = await getUserById(userId);
 
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
@@ -50,13 +32,9 @@ router.get('/today', async (req: AuthRequest, res: Response) => {
 
       let remainingGenerations = FREE_DAILY_LIMIT;
       if (!isPremium) {
-        const todayGenerations = await prisma.contentGeneration.count({
-          where: {
-            user_id: userId,
-            generated_date: today
-          }
-        });
-        remainingGenerations = FREE_DAILY_LIMIT - todayGenerations;
+        // Count today's generations by checking if generation record exists
+        const generation = await getContentGeneration(userId, today);
+        remainingGenerations = generation ? FREE_DAILY_LIMIT - 1 : FREE_DAILY_LIMIT;
       }
 
       return res.status(404).json({
@@ -73,7 +51,7 @@ router.get('/today', async (req: AuthRequest, res: Response) => {
       image_url: content.image_url,
       date: content.date,
       delivered_at: content.delivered_at,
-      feedback: content.feedback?.rating
+      feedback: content.feedback
     });
   } catch (error) {
     console.error('Get today content error:', error);
@@ -88,32 +66,14 @@ router.get('/history', async (req: AuthRequest, res: Response) => {
   const today = new Date().toISOString().split('T')[0];
 
   try {
-    const contents = await prisma.dailyContent.findMany({
-      where: {
-        user_id: userId,
-        date: {
-          lt: today
-        }
-      },
-      include: {
-        feedback: {
-          select: {
-            rating: true
-          }
-        }
-      },
-      orderBy: {
-        date: 'desc'
-      },
-      take: days
-    });
+    const contents = await getDailyContentsBeforeDate(userId, today, days);
 
     const history = contents.map((content) => ({
       id: content.id,
       text_preview: content.text.substring(0, 50) + (content.text.length > 50 ? '...' : ''),
       image_url: content.image_url,
       date: content.date,
-      feedback: content.feedback?.rating
+      feedback: content.feedback
     }));
 
     res.json(history);
@@ -129,19 +89,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
   const contentId = req.params.id as string;
 
   try {
-    const content = await prisma.dailyContent.findFirst({
-      where: {
-        id: contentId,
-        user_id: userId
-      },
-      include: {
-        feedback: {
-          select: {
-            rating: true
-          }
-        }
-      }
-    });
+    const content = await getDailyContentByIdAndUser(contentId, userId);
 
     if (!content) {
       return res.status(404).json({ error: 'Content not found' });
@@ -153,7 +101,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
       image_url: content.image_url,
       date: content.date,
       delivered_at: content.delivered_at,
-      feedback: content.feedback?.rating
+      feedback: content.feedback
     });
   } catch (error) {
     console.error('Get content error:', error);
@@ -168,9 +116,7 @@ router.post('/generate', contentGenerationRateLimit, async (req: AuthRequest, re
 
   try {
     // Get user to check if premium
-    const user = await prisma.user.findUnique({
-      where: { id: userId }
-    });
+    const user = await getUserById(userId);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -186,14 +132,9 @@ router.post('/generate', contentGenerationRateLimit, async (req: AuthRequest, re
     const FREE_DAILY_LIMIT = 1;
 
     if (!isPremium) {
-      const todayGenerations = await prisma.contentGeneration.count({
-        where: {
-          user_id: userId,
-          generated_date: today
-        }
-      });
+      const existingGeneration = await getContentGeneration(userId, today);
 
-      if (todayGenerations >= FREE_DAILY_LIMIT) {
+      if (existingGeneration) {
         return res.status(429).json({
           error: 'Daily limit reached',
           message: 'You\'ve reached your daily limit for free content generation. Upgrade to premium for unlimited access!',
@@ -204,14 +145,7 @@ router.post('/generate', contentGenerationRateLimit, async (req: AuthRequest, re
     }
 
     // Check if content already exists for today (skip if exists)
-    const existingContent = await prisma.dailyContent.findUnique({
-      where: {
-        user_id_date: {
-          user_id: userId,
-          date: today
-        }
-      }
-    });
+    const existingContent = await getDailyContent(userId, today);
 
     if (existingContent) {
       return res.status(400).json({
@@ -222,51 +156,31 @@ router.post('/generate', contentGenerationRateLimit, async (req: AuthRequest, re
     }
 
     // Get user's active photo
-    const userPhoto = await prisma.userPhoto.findFirst({
-      where: {
-        user_id: userId,
-        is_active: 1
-      },
-      orderBy: {
-        created_at: 'desc'
-      },
-      take: 1
-    });
-
-    const userPhotoUrl = userPhoto?.photo_url;
+    const userPhotos = await getUserPhotos(userId);
+    const userPhotoUrl = userPhotos.length > 0 ? userPhotos[0].photo_url : undefined;
 
     // Generate content
     console.log(`Generating content for user ${userId}...`);
     const text = await contentGenerator.generateStory(user);
     const imageUrl = await contentGenerator.generateImage(text, user, userPhotoUrl);
 
-    // Store content and track generation in a transaction
-    const contentId = uuidv4();
-    const generationId = uuidv4();
+    // Store content and track generation
+    const content = await createDailyContent({
+      user_id: userId,
+      text,
+      image_url: imageUrl,
+      date: today
+    });
 
-    await prisma.$transaction([
-      prisma.dailyContent.create({
-        data: {
-          id: contentId,
-          user_id: userId,
-          text,
-          image_url: imageUrl,
-          date: today
-        }
-      }),
-      prisma.contentGeneration.create({
-        data: {
-          id: generationId,
-          user_id: userId,
-          generated_date: today
-        }
-      })
-    ]);
+    await createContentGeneration({
+      user_id: userId,
+      generated_date: today
+    });
 
-    console.log(`Successfully generated content ${contentId} for user ${userId}`);
+    console.log(`Successfully generated content ${content.id} for user ${userId}`);
 
     res.json({
-      id: contentId,
+      id: content.id,
       text,
       image_url: imageUrl,
       date: today,

@@ -1,5 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
-import { prisma } from '../models/database';
+import { getUserById, getDailyContent, createDailyContent, createContentGeneration, getUserPhotos, pool } from '../models/database';
 import { contentGenerator } from '../services/contentGenerator';
 import type { User } from '../models/database';
 
@@ -7,53 +6,40 @@ import type { User } from '../models/database';
  * Generate daily content for a single user
  */
 async function generateContentForUser(userId: string, date: string): Promise<void> {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+
     // Check if content already exists for this user and date
-    const existing = await prisma.dailyContent.findUnique({
-      where: {
-        user_id_date: {
-          user_id: userId,
-          date: date
-        }
-      }
-    });
+    const existing = await getDailyContent(userId, date);
 
     if (existing) {
       console.log(`Content already exists for user ${userId} on ${date}`);
+      await client.query('ROLLBACK');
       return;
     }
 
     // Get user preferences
-    const user = await prisma.user.findUnique({
-      where: { id: userId }
-    });
+    const user = await getUserById(userId);
 
     if (!user) {
       console.error(`User ${userId} not found`);
+      await client.query('ROLLBACK');
       return;
     }
 
     // Skip users who haven't completed onboarding
     if (!user.is_onboarded) {
       console.log(`User ${userId} has not completed onboarding, skipping`);
+      await client.query('ROLLBACK');
       return;
     }
 
     console.log(`Generating content for user ${userId}...`);
 
     // Get user's active photos (use the most recent one)
-    const userPhoto = await prisma.userPhoto.findFirst({
-      where: {
-        user_id: userId,
-        is_active: 1
-      },
-      orderBy: {
-        created_at: 'desc'
-      },
-      take: 1
-    });
-
-    const userPhotoUrl = userPhoto?.photo_url;
+    const userPhotos = await getUserPhotos(userId);
+    const userPhotoUrl = userPhotos.length > 0 ? userPhotos[0].photo_url : undefined;
 
     if (userPhotoUrl) {
       console.log(`Found user photo, will use for image generation`);
@@ -66,35 +52,29 @@ async function generateContentForUser(userId: string, date: string): Promise<voi
     const imageUrl = await contentGenerator.generateImage(text, user as User, userPhotoUrl);
 
     // Store in database and track generation
-    const contentId = uuidv4();
-    const generationId = uuidv4();
+    const content = await createDailyContent({
+      user_id: userId,
+      text,
+      image_url: imageUrl,
+      date
+    });
 
-    await prisma.$transaction([
-      prisma.dailyContent.create({
-        data: {
-          id: contentId,
-          user_id: userId,
-          text,
-          image_url: imageUrl,
-          date
-        }
-      }),
-      prisma.contentGeneration.create({
-        data: {
-          id: generationId,
-          user_id: userId,
-          generated_date: date
-        }
-      })
-    ]);
+    await createContentGeneration({
+      user_id: userId,
+      generated_date: date
+    });
 
-    console.log(`Successfully generated content ${contentId} for user ${userId}`);
+    await client.query('COMMIT');
+    console.log(`Successfully generated content ${content.id} for user ${userId}`);
 
     // TODO: Schedule push notification for 8:00 AM
     // await schedulePushNotification(userId, contentId);
 
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error(`Failed to generate content for user ${userId}:`, error);
+  } finally {
+    client.release();
   }
 }
 
@@ -108,18 +88,11 @@ export async function generateDailyContentForAll(): Promise<void> {
 
   try {
     // Get all onboarded users with push tokens
-    const users = await prisma.user.findMany({
-      where: {
-        is_onboarded: 1,
-        OR: [
-          { push_token_ios: { not: null } },
-          { push_token_android: { not: null } }
-        ]
-      },
-      select: {
-        id: true
-      }
-    });
+    const result = await pool.query(
+      'SELECT id FROM users WHERE is_onboarded = 1 AND (push_token_ios IS NOT NULL OR push_token_android IS NOT NULL)'
+    );
+
+    const users = result.rows;
 
     console.log(`Found ${users.length} users to generate content for`);
 
@@ -145,14 +118,7 @@ export async function generateContentForUserNow(userId: string): Promise<any> {
 
   await generateContentForUser(userId, today);
 
-  const content = await prisma.dailyContent.findUnique({
-    where: {
-      user_id_date: {
-        user_id: userId,
-        date: today
-      }
-    }
-  });
+  const content = await getDailyContent(userId, today);
 
   return content;
 }
