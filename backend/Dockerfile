@@ -29,7 +29,6 @@ RUN groupadd -g 1001 nodejs && \
 
 # Copy package files
 COPY package*.json ./
-COPY prisma ./prisma/
 
 # Install production dependencies only
 RUN npm ci --only=production && \
