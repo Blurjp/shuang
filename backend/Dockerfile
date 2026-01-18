@@ -19,17 +19,17 @@ COPY . .
 # Build TypeScript
 RUN npm run build
 
-# Production stage
-FROM node:20-alpine AS production
+# Production stage - use Debian-based image for OpenSSL compatibility
+FROM node:20-slim AS production
 
 WORKDIR /app
 
-# Install dumb-init and OpenSSL 1.1 compatibility for Prisma
-RUN apk add --no-cache dumb-init openssl1.1-compat
+# Install dumb-init for proper signal handling
+RUN apt-get update && apt-get install -y --no-install-recommends dumb-init && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+RUN groupadd -g 1001 nodejs && \
+    useradd -u 1001 -g nodejs -s /bin/sh nodejs
 
 # Copy package files
 COPY package*.json ./
