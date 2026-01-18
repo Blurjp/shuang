@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
-import { checkDatabaseConnection, disconnectDatabase } from './models/database';
+import { checkDatabaseConnection, disconnectDatabase, initializeDatabase } from './models/database';
 import { requestLogger, errorLogger } from './middleware/logging';
 import { logger } from './utils/logger';
 
@@ -129,6 +129,10 @@ async function startServer() {
       logger.warn('Database connection failed. The server will start but may not function correctly.');
     } else {
       logger.info('Database connected successfully');
+
+      // Initialize database tables
+      await initializeDatabase();
+      logger.info('Database tables initialized');
     }
 
     // Start server
