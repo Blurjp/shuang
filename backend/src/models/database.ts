@@ -61,6 +61,12 @@ export interface ContentGeneration {
 // Database connection check
 export async function checkDatabaseConnection(): Promise<boolean> {
   try {
+    // Log the DATABASE_URL for debugging (hide password)
+    const dbUrl = process.env.DATABASE_URL || '';
+    const safeUrl = dbUrl.replace(/:[^:@]+@/, ':****@');
+    console.log('DATABASE_URL (safe):', safeUrl);
+    console.log('DATABASE_URL length:', dbUrl.length);
+
     const client = await pool.connect();
     await client.query('SELECT 1');
     client.release();
