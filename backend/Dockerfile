@@ -54,6 +54,7 @@ EXPOSE 3000
 
 # Set environment to production
 ENV NODE_ENV=production
+ENV PRISMA_CLIENT_ENGINE_TYPE=binary
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
