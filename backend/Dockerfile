@@ -36,12 +36,12 @@ COPY package*.json ./
 COPY prisma ./prisma/
 
 # Install production dependencies only
+# Note: postinstall script will run prisma generate automatically
 RUN npm ci --only=production && \
     npm cache clean --force
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 # Set ownership
 RUN chown -R nodejs:nodejs /app
