@@ -1,5 +1,5 @@
-# Build stage
-FROM node:20-alpine AS builder
+# Build stage - use Debian for consistent OpenSSL support
+FROM node:20-slim AS builder
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ COPY . .
 # Build TypeScript
 RUN npm run build
 
-# Production stage - use Debian-based image for OpenSSL compatibility
+# Production stage - use same base image for consistency
 FROM node:20-slim AS production
 
 WORKDIR /app
@@ -38,10 +38,6 @@ COPY prisma ./prisma/
 # Install production dependencies only
 RUN npm ci --only=production && \
     npm cache clean --force
-
-# Regenerate Prisma Client for Debian (glibc) target
-# The builder stage uses Alpine (musl) so we need to regenerate for production
-RUN npx prisma generate
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
