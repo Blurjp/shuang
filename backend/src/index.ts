@@ -15,6 +15,7 @@ import userRoutes from './routes/user';
 import contentRoutes from './routes/content';
 import feedbackRoutes from './routes/feedback';
 import photoRoutes from './routes/photos';
+import subscriptionRoutes from './routes/subscription';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -91,6 +92,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/photos', photoRoutes);
 app.use('/api/content', contentRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/subscription', subscriptionRoutes);
 
 // 404 handler
 app.use((req, res) => {

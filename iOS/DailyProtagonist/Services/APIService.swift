@@ -293,6 +293,28 @@ extension APIService {
     }
 }
 
+// MARK: - Subscription APIs
+extension APIService {
+    func updateSubscriptionStatus(isPremium: Bool, expirationDate: Date? = nil, token: String) async throws -> SuccessResponse {
+        guard let url = getURL(for: "/subscription/status") else {
+            throw APIError.invalidURL
+        }
+
+        let request = SubscriptionStatusRequest(isPremium: isPremium, expirationDate: expirationDate)
+        let body = try JSONEncoder().encode(request)
+
+        return try await performRequest(url: url, method: "POST", body: body, token: token, responseType: SuccessResponse.self)
+    }
+
+    func getSubscriptionStatus(token: String) async throws -> SubscriptionStatus {
+        guard let url = getURL(for: "/subscription/status") else {
+            throw APIError.invalidURL
+        }
+
+        return try await performRequest(url: url, method: "GET", token: token, responseType: SubscriptionStatus.self)
+    }
+}
+
 enum APIError: Error {
     case invalidURL
     case invalidResponse
@@ -304,20 +326,20 @@ enum APIError: Error {
 
     var localizedDescription: String {
         switch self {
-        case .invalidURL: return "无效的 URL"
-        case .invalidResponse: return "无效的响应"
+        case .invalidURL: return "Invalid URL"
+        case .invalidResponse: return "Invalid response"
         case .httpError(let code):
             switch code {
-            case 401: return "未授权，请重新登录"
-            case 403: return "没有权限"
-            case 404: return "资源未找到"
-            case 429: return "今日生成次数已用完，升级会员可无限生成"
-            case 500: return "服务器错误"
-            default: return "网络错误 (\(code))"
+            case 401: return "Unauthorized, please log in again"
+            case 403: return "Access denied"
+            case 404: return "Resource not found"
+            case 429: return "Daily limit reached, upgrade for unlimited access"
+            case 500: return "Server error"
+            default: return "Network error (\(code))"
             }
-        case .decodingError: return "数据解析失败"
-        case .networkError(let msg): return "网络连接失败: \(msg)"
-        case .unknownError(let msg): return "未知错误: \(msg)"
+        case .decodingError: return "Data parsing failed"
+        case .networkError(let msg): return "Network connection failed: \(msg)"
+        case .unknownError(let msg): return "Unknown error: \(msg)"
         case .noContent(let resp): return resp.error
         }
     }

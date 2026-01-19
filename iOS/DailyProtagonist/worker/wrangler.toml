@@ -1,0 +1,17 @@
+name = "daily-protagonist-api"
+main = "src/index-simple.js"
+compatibility_date = "2024-01-01"
+
+# Simplified version without KV for initial deployment
+# Will add caching later
+
+# Environment variables (secrets)
+# Run: wrangler secret put <KEY_NAME>
+# Or use dashboard at https://dash.cloudflare.com -> Workers -> Your Worker -> Settings -> Variables
+#
+# AI Providers (choose one or more):
+# - REPLICATE_API_KEY (RECOMMENDED - supports IP-Adapter-FaceID for face-to-image)
+# - STABILITY_API_KEY (for Stable Diffusion with img2img support)
+# - OPENAI_API_KEY (for DALL-E - text-to-image only, NO face support)
+#
+# NOTE: For face-to-image generation (using user's uploaded photo), use REPLICATE_API_KEY

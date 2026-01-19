@@ -1,0 +1,389 @@
+import SwiftUI
+import PhotosUI
+
+struct ProfileView: View {
+    @EnvironmentObject var authManager: AuthManager
+    @StateObject private var viewModel = ProfileViewModel()
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
+    @State private var showingEditPreferences = false
+    @State private var showingUpgrade = false
+    @State private var showingLogoutAlert = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showingPhotoAlert = false
+    @State private var photoAlertMessage = ""
+    @State private var showingDeleteAlert = false
+    @State private var photoToDelete: UserPhoto?
+
+    private var isUploadingPhoto: Bool {
+        viewModel.isUploadingPhoto
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                // User Info Section
+                Section {
+                    HStack {
+                        Image(systemName: "person.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(.blue)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("User")
+                                .font(.headline)
+                            Text("ID: \(authManager.currentUser?.id.prefix(8) ?? "")...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+
+                // My Photos Section
+                Section("My Photos") {
+                    if viewModel.userPhotos.isEmpty && !isUploadingPhoto {
+                        // Empty state - show upload prompt
+                        PhotosPicker(
+                            selection: $selectedPhotoItem,
+                            matching: .images
+                        ) {
+                            VStack(spacing: 12) {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.gray)
+                                Text("Tap to Upload Photo")
+                                    .foregroundColor(.blue)
+                                Text("No photos uploaded yet")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: CGFloat.infinity)
+                            .padding(.vertical, 20)
+                        }
+                        .onChange(of: selectedPhotoItem) { _, newItem in
+                            Task {
+                                await handlePhotoSelection(newItem)
+                            }
+                        }
+                    } else {
+                        // Photos Grid with existing photos
+                        LazyVGrid(columns: [
+                            GridItem(.flexible()),
+                            GridItem(.flexible()),
+                            GridItem(.flexible())
+                        ], spacing: 12) {
+                            ForEach(viewModel.userPhotos) { photo in
+                                ZStack(alignment: .topTrailing) {
+                                    RemoteImageView(urlString: photo.photoUrl) { image in
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                    } placeholder: {
+                                        ProgressView()
+                                    }
+                                    .frame(width: 80, height: 80)
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                                    )
+
+                                    // Delete button
+                                    Button(action: {
+                                        photoToDelete = photo
+                                        showingDeleteAlert = true
+                                    }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 24))
+                                            .foregroundColor(.white)
+                                            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .offset(x: 4, y: -4)
+                                }
+                            }
+
+                            // Upload button
+                            PhotosPicker(
+                                selection: $selectedPhotoItem,
+                                matching: .images
+                            ) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.gray.opacity(0.1))
+                                        .frame(width: 80, height: 80)
+
+                                    if isUploadingPhoto {
+                                        ProgressView()
+                                    } else {
+                                        Image(systemName: "plus")
+                                            .font(.title)
+                                            .foregroundColor(.blue)
+                                    }
+                                }
+                            }
+                            .disabled(isUploadingPhoto)
+                            .onChange(of: selectedPhotoItem) { _, newItem in
+                                Task {
+                                    await handlePhotoSelection(newItem)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+
+                // Preferences Section
+                Section("My Preferences") {
+                    if let preferences = viewModel.userPreferences {
+                        PreferenceRow(label: "Gender", value: preferences.gender.displayName)
+                        PreferenceRow(label: "Genre", value: preferences.genrePreference.displayName)
+                        PreferenceRow(label: "Mood", value: preferences.emotionPreference.displayName)
+                    } else if viewModel.isLoading {
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Loading...")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
+                // Membership Section
+                Section("Membership") {
+                    HStack {
+                        Image(systemName: subscriptionManager.isPremium ? "crown.fill" : "person.circle")
+                            .foregroundColor(subscriptionManager.isPremium ? .yellow : .gray)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(subscriptionManager.isPremium ? "Premium Member" : "Free User")
+                                .font(.headline)
+
+                            if subscriptionManager.isPremium {
+                                Text("All features unlocked")
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                            } else {
+                                Text("Upgrade for unlimited stories")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        Spacer()
+
+                        if !subscriptionManager.isPremium {
+                            Button("Upgrade") {
+                                showingUpgrade = true
+                            }
+                            .buttonStyle(.bordered)
+                        } else {
+                            Button("Manage") {
+                                subscriptionManager.manageSubscription()
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+
+                // Actions Section
+                Section("Settings") {
+                    Button(action: {
+                        showingEditPreferences = true
+                    }) {
+                        HStack {
+                            Image(systemName: "slider.horizontal.3")
+                            Text("Edit Preferences")
+                        }
+                    }
+                    .foregroundColor(.primary)
+
+                    Button(action: {
+                        // TODO: Implement about page
+                    }) {
+                        HStack {
+                            Image(systemName: "info.circle")
+                            Text("About")
+                        }
+                    }
+                    .foregroundColor(.primary)
+                }
+
+                Section {
+                    Button(action: {
+                        showingLogoutAlert = true
+                    }) {
+                        HStack {
+                            Image(systemName: "arrow.right.square")
+                            Text("Log Out")
+                        }
+                        .foregroundColor(.red)
+                    }
+                }
+            }
+            .navigationTitle("Profile")
+            .task {
+                // Inject authManager reference
+                viewModel.authManager = authManager
+                if let token = authManager.getAuthToken() {
+                    await viewModel.loadPreferences(token: token)
+                    await viewModel.loadUserPhotos(token: token)
+                }
+            }
+            .alert("Alert", isPresented: $showingPhotoAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(photoAlertMessage)
+            }
+            .sheet(isPresented: $showingEditPreferences) {
+                if let preferences = viewModel.userPreferences {
+                    EditPreferencesView(
+                        currentPreferences: preferences,
+                        onSave: { gender, genre, emotion in
+                            Task {
+                                if let token = authManager.getAuthToken() {
+                                    await viewModel.updatePreferences(
+                                        gender: gender,
+                                        genrePreference: genre,
+                                        emotionPreference: emotion,
+                                        token: token
+                                    )
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+            .alert("Log Out", isPresented: $showingLogoutAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Log Out", role: .destructive) {
+                    authManager.logout()
+                }
+            } message: {
+                Text("Are you sure you want to log out?")
+            }
+            .alert("Delete Photo", isPresented: $showingDeleteAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) {
+                    if let photo = photoToDelete, let token = authManager.getAuthToken() {
+                        Task {
+                            await viewModel.deletePhoto(photoId: photo.id, token: token)
+                            if let error = viewModel.errorMessage {
+                                photoAlertMessage = error
+                                showingPhotoAlert = true
+                            }
+                        }
+                    }
+                    photoToDelete = nil
+                }
+            } message: {
+                Text("Are you sure you want to delete this photo?")
+            }
+            .sheet(isPresented: $showingUpgrade) {
+                UpgradeView(isPresented: $showingUpgrade)
+            }
+        }
+    }
+
+    private func handlePhotoSelection(_ item: PhotosPickerItem?) async {
+        guard let item = item else { return }
+
+        do {
+            if let data = try await item.loadTransferable(type: Data.self) {
+                if let token = authManager.getAuthToken() {
+                    await viewModel.uploadPhoto(imageData: data, token: token)
+
+                    if let error = viewModel.errorMessage {
+                        photoAlertMessage = error
+                        showingPhotoAlert = true
+                    }
+                }
+            }
+        } catch {
+            photoAlertMessage = "Failed to select photo: \(error.localizedDescription)"
+            showingPhotoAlert = true
+        }
+
+        selectedPhotoItem = nil
+    }
+}
+
+struct PreferenceRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+struct EditPreferencesView: View {
+    @Environment(\.dismiss) var dismiss
+    let currentPreferences: UserPreferences
+    let onSave: (User.Gender?, User.Genre?, User.Emotion?) -> Void
+
+    @State private var selectedGender: User.Gender
+    @State private var selectedGenre: User.Genre
+    @State private var selectedEmotion: User.Emotion
+
+    init(currentPreferences: UserPreferences, onSave: @escaping (User.Gender?, User.Genre?, User.Emotion?) -> Void) {
+        self.currentPreferences = currentPreferences
+        self.onSave = onSave
+        _selectedGender = State(initialValue: currentPreferences.gender)
+        _selectedGenre = State(initialValue: currentPreferences.genrePreference)
+        _selectedEmotion = State(initialValue: currentPreferences.emotionPreference)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Gender") {
+                    Picker("Gender", selection: $selectedGender) {
+                        ForEach(User.Gender.allCases, id: \.self) { gender in
+                            Text(gender.displayName).tag(gender)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Section("Genre") {
+                    Picker("Genre", selection: $selectedGenre) {
+                        ForEach(User.Genre.allCases, id: \.self) { genre in
+                            Text(genre.displayName).tag(genre)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                Section("Mood") {
+                    Picker("Mood", selection: $selectedEmotion) {
+                        ForEach(User.Emotion.allCases, id: \.self) { emotion in
+                            Text(emotion.displayName).tag(emotion)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+            .navigationTitle("Edit Preferences")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        onSave(selectedGender, selectedGenre, selectedEmotion)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
