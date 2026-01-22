@@ -1,8 +1,7 @@
 import { Router, Response } from 'express';
-import { getUserById, getDailyContent, createDailyContent, getContentGeneration, createContentGeneration, getUserPhotos, getDailyContentsBeforeDate, getDailyContentByIdAndUser } from '../models/database';
+import { getUserById, getDailyContent, createDailyContent, updateDailyContent, getContentGeneration, createContentGeneration, getUserPhotos, getDailyContentsBeforeDate, getDailyContentByIdAndUser } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { contentGenerator } from '../services/contentGenerator';
-import { contentGenerationRateLimit } from '../middleware/rateLimit';
 
 const router = Router();
 
@@ -110,7 +109,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
 });
 
 // Manually generate new content
-router.post('/generate', contentGenerationRateLimit, async (req: AuthRequest, res: Response) => {
+router.post('/generate', async (req: AuthRequest, res: Response) => {
   const userId = req.userId!;
   const today = new Date().toISOString().split('T')[0];
 
@@ -144,15 +143,42 @@ router.post('/generate', contentGenerationRateLimit, async (req: AuthRequest, re
       }
     }
 
-    // Check if content already exists for today (skip if exists)
+    // Check if content already exists for today
     const existingContent = await getDailyContent(userId, today);
 
-    if (existingContent) {
+    // For free users, prevent regeneration
+    if (!isPremium && existingContent) {
       return res.status(400).json({
         error: 'Content already exists',
         message: 'Content for today has already been generated',
         canGenerate: false
       });
+    }
+
+    // For non-premium users, apply rate limiting (1 request per minute)
+    if (!isPremium) {
+      const rateLimitKey = `content_gen_${userId}`;
+      const now = Date.now();
+      const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+      const RATE_LIMIT_MAX = 1;
+
+      // Simple in-memory rate limit check (for production, use Redis)
+      if (req.rateLimitCache && req.rateLimitCache[rateLimitKey]) {
+        const lastRequest = req.rateLimitCache[rateLimitKey];
+        if (now - lastRequest.timestamp < RATE_LIMIT_WINDOW) {
+          const retryAfter = Math.ceil((RATE_LIMIT_WINDOW - (now - lastRequest.timestamp)) / 1000);
+          return res.status(429).json({
+            error: 'Content generation rate limit exceeded. Please wait before generating again.',
+            retryAfter: retryAfter
+          });
+        }
+      }
+
+      // Update rate limit cache (initialize if needed)
+      if (!req.rateLimitCache) {
+        req.rateLimitCache = {};
+      }
+      req.rateLimitCache[rateLimitKey] = { timestamp: now };
     }
 
     // Get user's active photo
@@ -164,18 +190,33 @@ router.post('/generate', contentGenerationRateLimit, async (req: AuthRequest, re
     const text = await contentGenerator.generateStory(user);
     const imageUrl = await contentGenerator.generateImage(text, user, userPhotoUrl);
 
-    // Store content and track generation
-    const content = await createDailyContent({
-      user_id: userId,
-      text,
-      image_url: imageUrl,
-      date: today
-    });
+    // Store or update content
+    let content;
+    if (existingContent) {
+      // Premium user regenerating content - update existing
+      console.log(`Updating existing content ${existingContent.id} for user ${userId}`);
+      content = await updateDailyContent(existingContent.id, {
+        text,
+        image_url: imageUrl
+      });
+      if (!content) {
+        throw new Error('Failed to update content');
+      }
+    } else {
+      // First time generating content today
+      content = await createDailyContent({
+        user_id: userId,
+        text,
+        image_url: imageUrl,
+        date: today
+      });
 
-    await createContentGeneration({
-      user_id: userId,
-      generated_date: today
-    });
+      // Track generation (only for first generation of the day)
+      await createContentGeneration({
+        user_id: userId,
+        generated_date: today
+      });
+    }
 
     console.log(`Successfully generated content ${content.id} for user ${userId}`);
 
@@ -184,7 +225,7 @@ router.post('/generate', contentGenerationRateLimit, async (req: AuthRequest, re
       text,
       image_url: imageUrl,
       date: today,
-      canGenerate: !isPremium, // Can generate again if premium
+      canGenerate: true, // Premium users can always generate more
       isPremium: isPremium,
       remainingGenerations: isPremium ? -1 : FREE_DAILY_LIMIT - 1
     });

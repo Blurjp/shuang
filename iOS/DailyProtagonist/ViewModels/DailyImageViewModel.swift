@@ -4,12 +4,27 @@ import SwiftUI
 import PhotosUI
 
 /// State machine for daily image generation
-enum DailyImageState {
+enum DailyImageState: Equatable {
     case idle                      // Hasn't generated yet today
     case needsFace                 // User needs to upload face photo first
     case loading                   // Currently generating
     case success(UIImage)          // Image ready to display
     case error(String)             // Error occurred
+
+    static func == (lhs: DailyImageState, rhs: DailyImageState) -> Bool {
+        switch (lhs, rhs) {
+        case (.idle, .idle),
+             (.needsFace, .needsFace),
+             (.loading, .loading):
+            return true
+        case (.success(let lhsImage), .success(let rhsImage)):
+            return lhsImage === rhsImage
+        case (.error(let lhsError), .error(let rhsError)):
+            return lhsError == rhsError
+        default:
+            return false
+        }
+    }
 }
 
 @MainActor
@@ -48,7 +63,7 @@ class DailyImageViewModel: ObservableObject {
         } else if cache.getMetadata(for: today) != nil {
             // We know it was generated, but file is missing
             state = .idle
-        } else if !cache.isFaceRegistered {
+        } else if !cache.isFaceRegistered || cache.loadFacePhoto() == nil {
             state = .needsFace
         } else {
             state = .idle
@@ -60,7 +75,7 @@ class DailyImageViewModel: ObservableObject {
         let today = todayDate
 
         // Check if user needs to register face first
-        if !cache.isFaceRegistered {
+        guard let faceDataURL = cachedFaceDataURL() else {
             state = .needsFace
             return
         }
@@ -73,8 +88,6 @@ class DailyImageViewModel: ObservableObject {
         } else if cache.getMetadata(for: today) != nil {
             // We know it was generated, but file is missing
             state = .idle
-        } else if !cache.isFaceRegistered {
-            state = .needsFace
         } else {
             state = .idle
         }
@@ -85,7 +98,7 @@ class DailyImageViewModel: ObservableObject {
             // Call API (no face data needed after first time)
             let result = try await service.fetchDailyImage(
                 storyText: storyText,
-                faceBase64: nil // Face already registered
+                faceBase64: faceDataURL
             )
 
             // Parse base64 image
@@ -133,6 +146,7 @@ class DailyImageViewModel: ObservableObject {
 
         // Store for upload
         selectedPhotoData = compressedData
+        cache.saveFacePhoto(compressedData)
 
         // Register face photo
         await registerFacePhoto(dataURL: dataURL, imageData: compressedData)
@@ -221,5 +235,13 @@ class DailyImageViewModel: ObservableObject {
             return String(dataURL[range.upperBound...])
         }
         return dataURL
+    }
+
+    private func cachedFaceDataURL() -> String? {
+        guard let faceData = cache.loadFacePhoto() else {
+            return nil
+        }
+        let base64String = faceData.base64EncodedString()
+        return "data:image/jpeg;base64,\(base64String)"
     }
 }

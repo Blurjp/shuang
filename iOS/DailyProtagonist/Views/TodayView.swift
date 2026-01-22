@@ -3,8 +3,14 @@ import PhotosUI
 
 struct TodayView: View {
     @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
     @StateObject private var viewModel = TodayViewModel()
     @StateObject private var dailyImageViewModel = DailyImageViewModel()
+
+    // Combined premium status from both backend and local subscription manager
+    private var isPremium: Bool {
+        viewModel.isPremium || subscriptionManager.isPremium
+    }
 
     init() {
         // Inject authManager into viewModel after it's created
@@ -35,6 +41,7 @@ struct TodayView: View {
                             Spacer()
                         }
                         .padding()
+                        .padding(.horizontal, 16)
 
                         Divider()
 
@@ -48,36 +55,37 @@ struct TodayView: View {
                         RemoteImageView(urlString: content.imageUrl) { image in
                             image
                                 .resizable()
-                                .aspectRatio(contentMode: .fill)
+                                .aspectRatio(contentMode: .fit)
                         } placeholder: {
                             ProgressView()
                                 .frame(maxWidth: CGFloat.infinity)
-                                .frame(height: 400)
+                                .frame(height: 250)
                                 .background(Color.gray.opacity(0.2))
                         } failure: {
                             Image(systemName: "photo")
                                 .font(.system(size: 60))
                                 .foregroundColor(.gray)
                                 .frame(maxWidth: CGFloat.infinity)
-                                .frame(height: 400)
+                                .frame(height: 250)
                                 .background(Color.gray.opacity(0.2))
                         }
-                        .frame(maxWidth: CGFloat.infinity)
-                        .frame(height: 400)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 250)
                         .clipped()
 
                         // Content Text
-                        VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 12) {
                             Text(content.text)
                                 .font(.body)
                                 .lineSpacing(6)
-                                .padding()
                         }
+                        .padding()
+                        .padding(.horizontal, 4)
 
                         Divider()
 
                         // Feedback Buttons
-                        HStack(spacing: 16) {
+                        HStack(spacing: 12) {
                             ForEach([FeedbackRating.like, .neutral, .dislike], id: \.self) { rating in
                                 Button(action: {
                                     Task {
@@ -86,19 +94,24 @@ struct TodayView: View {
                                 }) {
                                     VStack(spacing: 4) {
                                         Text(rating.icon)
-                                            .font(.title)
+                                            .font(.title2)
                                         Text(rating == .like ? "Love" : rating == .neutral ? "Okay" : "Dislike")
-                                            .font(.caption)
+                                            .font(.caption2)
                                     }
                                     .frame(maxWidth: CGFloat.infinity)
-                                    .padding()
+                                    .padding(.vertical, 12)
                                     .background(content.feedback == rating ? Color.blue.opacity(0.2) : Color.gray.opacity(0.1))
-                                    .cornerRadius(12)
+                                    .cornerRadius(10)
                                 }
                                 .foregroundColor(.primary)
                             }
                         }
-                        .padding()
+                        .padding(.horizontal)
+
+                        // Premium: Generate More Section
+                        if isPremium {
+                            premiumGenerateMoreSection
+                        }
                     }
                 } else if let error = viewModel.errorMessage {
                     VStack(spacing: 20) {
@@ -189,14 +202,26 @@ struct TodayView: View {
                         }
                         .font(.subheadline)
                         .foregroundColor(.blue)
+
+                        // Premium: Quick Actions Section
+                        if isPremium {
+                            premiumQuickActionsSection
+                        }
+
+                        // Upgrade button for free users
+                        if !isPremium {
+                            upgradeButtonView
+                        }
                     }
                     .frame(maxWidth: CGFloat.infinity, minHeight: 300)
                 }
             }
             .navigationTitle("Today")
             .task {
-                // Inject authManager reference
+                // Inject manager references
                 viewModel.authManager = authManager
+                viewModel.subscriptionManager = subscriptionManager
+                viewModel.dailyImageViewModel = dailyImageViewModel
                 print("🔵 TodayView task started")
                 if let token = authManager.getAuthToken() {
                     print("🔵 Token found: \(token.prefix(20))...")
@@ -234,7 +259,7 @@ struct TodayView: View {
 
     // Helper to break up complex expression
     private var generateButtonText: String {
-        if viewModel.isPremium {
+        if isPremium {
             return "Unlimited"
         } else {
             return "\(viewModel.remainingGenerations) left today"
@@ -242,11 +267,255 @@ struct TodayView: View {
     }
 
     private var generateButtonSubtext: String {
-        if viewModel.isPremium {
+        if isPremium {
             return "Premium - Generate unlimited content"
         } else {
             return "Free users: 1 generation per day. Upgrade for unlimited."
         }
+    }
+
+    private var upgradeButtonView: some View {
+        Button(action: {
+            viewModel.showUpgradeAlert = true
+        }) {
+            HStack {
+                Image(systemName: "crown.fill")
+                    .foregroundColor(.yellow)
+                Text("Upgrade to Premium")
+                    .fontWeight(.semibold)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [Color.yellow, Color.orange]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .foregroundColor(.white)
+            .cornerRadius(12)
+        }
+    }
+
+    @ViewBuilder
+    private var premiumQuickActionsSection: some View {
+        VStack(spacing: 16) {
+            Divider()
+
+            // Premium badge
+            HStack {
+                Image(systemName: "crown.fill")
+                    .foregroundColor(.yellow)
+                Text("Premium - Unlimited Content")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(.horizontal)
+
+            // Combined: Generate story + portrait button
+            Button(action: {
+                Task {
+                    if let token = authManager.getAuthToken() {
+                        await viewModel.generateStoryWithPortrait(token: token)
+                    }
+                }
+            }) {
+                HStack(spacing: 12) {
+                    Image(systemName: "sparkles")
+                        .foregroundColor(.purple)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Generate Story & Portrait")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Text("New story with personalized AI portrait using your face")
+                            .font(.caption2)
+                    }
+
+                    Spacer()
+
+                    if viewModel.isGenerating || viewModel.isGeneratingPortrait {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                    }
+                }
+                .foregroundColor(.primary)
+                .padding()
+                .background(
+                    LinearGradient(
+                        gradient: Gradient(colors: [Color.purple.opacity(0.15), Color.blue.opacity(0.15)]),
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .cornerRadius(12)
+            }
+            .disabled(viewModel.isGenerating || viewModel.isGeneratingPortrait)
+        }
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private var premiumGenerateMoreSection: some View {
+        Divider()
+
+        VStack(spacing: 16) {
+            // Premium badge
+            HStack {
+                Image(systemName: "crown.fill")
+                    .foregroundColor(.yellow)
+                Text("Premium - Unlimited Content")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(.horizontal)
+
+            // Combined: Generate new story AND personalized portrait
+            Button(action: {
+                Task {
+                    if let token = authManager.getAuthToken() {
+                        await viewModel.generateStoryWithPortrait(token: token)
+                    }
+                }
+            }) {
+                HStack(spacing: 16) {
+                    // Left: Story icon
+                    VStack(spacing: 8) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    gradient: Gradient(colors: [Color.blue.opacity(0.2), Color.purple.opacity(0.2)]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 60, height: 60)
+
+                            Image(systemName: "sparkles")
+                                .font(.title2)
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [Color.blue, Color.purple]),
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        }
+
+                        Text("Story")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                    }
+
+                    // Center: Plus icon
+                    Image(systemName: "plus")
+                        .font(.title3)
+                        .foregroundColor(.secondary)
+
+                    // Right: Portrait icon
+                    VStack(spacing: 8) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    gradient: Gradient(colors: [Color.orange.opacity(0.2), Color.pink.opacity(0.2)]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 60, height: 60)
+
+                            Image(systemName: "person.fill.viewfinder")
+                                .font(.title2)
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [Color.orange, Color.pink]),
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        }
+
+                        Text("Portrait")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                    }
+
+                    Spacer()
+
+                    // Right side: Description and arrow
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Generate New Story & Portrait")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+
+                        HStack(spacing: 4) {
+                            if viewModel.isGenerating || viewModel.isGeneratingPortrait {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+
+                                if viewModel.isGenerating {
+                                    Text("Generating story...")
+                                        .font(.caption)
+                                } else if viewModel.isGeneratingPortrait {
+                                    Text("Creating portrait...")
+                                        .font(.caption)
+                                }
+                            } else {
+                                Text("New story with your face")
+                                    .font(.caption)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                    }
+                }
+                .foregroundColor(.primary)
+                .padding()
+                .background(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color.blue.opacity(0.08),
+                            Color.purple.opacity(0.08),
+                            Color.orange.opacity(0.08)
+                        ]),
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .cornerRadius(16)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color.blue.opacity(0.3),
+                                    Color.purple.opacity(0.3),
+                                    Color.orange.opacity(0.3)
+                                ]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            lineWidth: 1.5
+                        )
+                )
+            }
+            .disabled(viewModel.isGenerating || viewModel.isGeneratingPortrait)
+
+            Text("✨ Unlimited generations • Story + Personalized Portrait with your face")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+        }
+        .padding(.vertical, 16)
     }
 
     @ViewBuilder

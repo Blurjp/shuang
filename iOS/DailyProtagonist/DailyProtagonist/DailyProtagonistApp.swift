@@ -11,6 +11,7 @@ struct DailyProtagonistApp: App {
             ContentView()
                 .environmentObject(authManager)
                 .environmentObject(pushNotificationManager)
+                .environmentObject(SubscriptionManager.shared)
                 .onAppear {
                     setupPushNotifications()
                 }

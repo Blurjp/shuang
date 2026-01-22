@@ -1,6 +1,9 @@
 import Foundation
 import PhotosUI
 
+// MARK: - Photo Caching
+private let photosCacheKey = "cached_user_photos"
+
 @MainActor
 class ProfileViewModel: ObservableObject {
     @Published var userPreferences: UserPreferences?
@@ -12,6 +15,37 @@ class ProfileViewModel: ObservableObject {
 
     private let apiService = APIService.shared
     weak var authManager: AuthManager?
+
+    init() {
+        // Load cached photos immediately on initialization
+        loadCachedPhotos()
+    }
+
+    // MARK: - Caching
+
+    private func loadCachedPhotos() {
+        if let cached = getCachedPhotos() {
+            userPhotos = cached
+            print("✅ Loaded \(cached.count) cached photos")
+        }
+    }
+
+    private func saveCachedPhotos(_ photos: [UserPhoto]) {
+        if let data = try? JSONEncoder().encode(photos),
+           let jsonString = String(data: data, encoding: .utf8) {
+            UserDefaults.standard.set(jsonString, forKey: photosCacheKey)
+            print("✅ Cached \(photos.count) photos")
+        }
+    }
+
+    private func getCachedPhotos() -> [UserPhoto]? {
+        guard let jsonString = UserDefaults.standard.string(forKey: photosCacheKey),
+              let data = jsonString.data(using: .utf8),
+              let photos = try? JSONDecoder().decode([UserPhoto].self, from: data) else {
+            return nil
+        }
+        return photos
+    }
 
     func loadPreferences(token: String) async {
         isLoading = true
@@ -39,7 +73,11 @@ class ProfileViewModel: ObservableObject {
 
     func loadUserPhotos(token: String) async {
         do {
-            userPhotos = try await apiService.getUserPhotos(token: token)
+            let photos = try await apiService.getUserPhotos(token: token)
+            userPhotos = photos
+            // Save to cache for instant loading next time
+            saveCachedPhotos(photos)
+            print("✅ Loaded \(photos.count) photos from API")
         } catch let error as APIError {
             if case .httpError(403) = error {
                 await handleExpiredToken()
@@ -63,7 +101,7 @@ class ProfileViewModel: ObservableObject {
             let response = try await apiService.uploadPhoto(imageData: imageData, token: token)
             print("Photo uploaded successfully: \(response.id)")
 
-            // Reload photos
+            // Reload photos and update cache
             await loadUserPhotos(token: token)
         } catch let error as APIError {
             if case .httpError(403) = error {
@@ -87,8 +125,9 @@ class ProfileViewModel: ObservableObject {
     func deletePhoto(photoId: String, token: String) async {
         do {
             try await apiService.deletePhoto(photoId: photoId, token: token)
-            // Remove from local array
+            // Remove from local array and update cache
             userPhotos.removeAll { $0.id == photoId }
+            saveCachedPhotos(userPhotos)
         } catch let error as APIError {
             if case .httpError(403) = error {
                 await handleExpiredToken()

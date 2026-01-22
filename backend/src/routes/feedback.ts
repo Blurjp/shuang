@@ -1,11 +1,46 @@
 import { Router, Response } from 'express';
-import { getFeedbackByContentId, createFeedback, verifyContentOwnership } from '../models/database';
+import { getFeedbackByContentId, createFeedback, verifyContentOwnership, db, getUserById, updateUser } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { analyzeUserFeedback, shouldSuggestPreferenceChange, getPersonalizedSuggestions, getSatisfactionTrend } from '../services/feedbackAnalyzer';
 
 const router = Router();
 
 // All feedback routes require authentication
 router.use(authenticateToken);
+
+// Get user's feedback insights and analytics
+router.get('/insights/user', async (req: AuthRequest, res: Response) => {
+  const userId = req.userId!;
+
+  try {
+    const insights = await analyzeUserFeedback(userId);
+    const trend = await getSatisfactionTrend(userId);
+    const suggestion = await shouldSuggestPreferenceChange(userId);
+
+    res.json({
+      ...insights,
+      trend,
+      suggestion
+    });
+  } catch (error) {
+    console.error('Get feedback insights error:', error);
+    res.status(500).json({ error: 'Failed to get feedback insights' });
+  }
+});
+
+// Get personalized suggestions based on feedback
+router.get('/suggestions/user', async (req: AuthRequest, res: Response) => {
+  const userId = req.userId!;
+
+  try {
+    const suggestions = await getPersonalizedSuggestions(userId);
+
+    res.json(suggestions);
+  } catch (error) {
+    console.error('Get suggestions error:', error);
+    res.status(500).json({ error: 'Failed to get suggestions' });
+  }
+});
 
 // Submit feedback
 router.post('/', async (req: AuthRequest, res: Response) => {
@@ -34,11 +69,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
 
     if (existingFeedback) {
       // Update existing feedback - we need to delete and recreate since we don't have an update function
-      const { pool } = await import('../models/database');
-      await pool.query(
-        'DELETE FROM feedback WHERE content_id = $1',
-        [content_id]
-      );
+      db.prepare('DELETE FROM feedback WHERE content_id = ?').run(content_id);
     }
 
     // Insert new feedback

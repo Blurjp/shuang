@@ -46,11 +46,11 @@ struct User: Codable {
 
         var displayName: String {
             switch self {
-            case .modern: return "Modern"
-            case .ancient: return "Historical"
-            case .fantasy: return "Fantasy"
-            case .urban: return "Urban"
-            case .business: return "Business"
+            case .modern: return "Workplace Counterattack"
+            case .ancient: return "Modern Urban"
+            case .fantasy: return "Urban Rise"
+            case .urban: return "Urban Success"
+            case .business: return "Business Warfare"
             }
         }
     }
@@ -63,10 +63,10 @@ struct User: Codable {
 
         var displayName: String {
             switch self {
-            case .favored: return "Cherished"
-            case .revenge: return "Revenge"
-            case .satisfaction: return "Triumph"
-            case .growth: return "Growth"
+            case .favored: return "CEO Doting"
+            case .revenge: return "Face-Slapping Revenge"
+            case .satisfaction: return "Triumphant Rise"
+            case .growth: return "Power Level Up"
             }
         }
     }

@@ -7,6 +7,7 @@ class DailyImageCache {
 
     private let fileManager = FileManager.default
     private let cacheDirectory: URL
+    private let facePhotoFilename = "face_photo.jpg"
 
     private struct Keys {
         static let faceRegistered = "daily_image_face_registered"
@@ -114,6 +115,7 @@ class DailyImageCache {
     /// Clear face registration (for testing/reupload)
     func clearFaceRegistration() {
         isFaceRegistered = false
+        clearFacePhoto()
         print("🔄 Face registration cleared")
     }
 
@@ -121,6 +123,36 @@ class DailyImageCache {
 
     private func imageName(for date: String) -> String {
         return "daily_image_\(date).png"
+    }
+
+    // MARK: - Face Photo Storage
+
+    func saveFacePhoto(_ data: Data) {
+        let fileURL = cacheDirectory.appendingPathComponent(facePhotoFilename)
+        do {
+            try data.write(to: fileURL)
+            print("💾 Saved face photo")
+        } catch {
+            print("❌ Failed to save face photo: \(error)")
+        }
+    }
+
+    func loadFacePhoto() -> Data? {
+        let fileURL = cacheDirectory.appendingPathComponent(facePhotoFilename)
+        guard fileManager.fileExists(atPath: fileURL.path) else {
+            return nil
+        }
+        do {
+            return try Data(contentsOf: fileURL)
+        } catch {
+            print("❌ Failed to load face photo: \(error)")
+            return nil
+        }
+    }
+
+    func clearFacePhoto() {
+        let fileURL = cacheDirectory.appendingPathComponent(facePhotoFilename)
+        try? fileManager.removeItem(at: fileURL)
     }
 
     /// Get cache size in bytes

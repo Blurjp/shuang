@@ -3,9 +3,8 @@ import PhotosUI
 
 struct ProfileView: View {
     @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
     @StateObject private var viewModel = ProfileViewModel()
-    @StateObject private var subscriptionManager = SubscriptionManager.shared
-    @State private var showingEditPreferences = false
     @State private var showingUpgrade = false
     @State private var showingLogoutAlert = false
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -13,6 +12,12 @@ struct ProfileView: View {
     @State private var photoAlertMessage = ""
     @State private var showingDeleteAlert = false
     @State private var photoToDelete: UserPhoto?
+
+    // Inline preference state
+    @State private var selectedGender: User.Gender?
+    @State private var selectedGenre: User.Genre?
+    @State private var selectedEmotion: User.Emotion?
+    @State private var isUpdatingPreferences = false
 
     private var isUploadingPhoto: Bool {
         viewModel.isUploadingPhoto
@@ -59,11 +64,6 @@ struct ProfileView: View {
                             }
                             .frame(maxWidth: CGFloat.infinity)
                             .padding(.vertical, 20)
-                        }
-                        .onChange(of: selectedPhotoItem) { _, newItem in
-                            Task {
-                                await handlePhotoSelection(newItem)
-                            }
                         }
                     } else {
                         // Photos Grid with existing photos
@@ -123,11 +123,6 @@ struct ProfileView: View {
                                 }
                             }
                             .disabled(isUploadingPhoto)
-                            .onChange(of: selectedPhotoItem) { _, newItem in
-                                Task {
-                                    await handlePhotoSelection(newItem)
-                                }
-                            }
                         }
                         .padding(.vertical, 8)
                     }
@@ -135,16 +130,61 @@ struct ProfileView: View {
 
                 // Preferences Section
                 Section("My Preferences") {
-                    if let preferences = viewModel.userPreferences {
-                        PreferenceRow(label: "Gender", value: preferences.gender.displayName)
-                        PreferenceRow(label: "Genre", value: preferences.genrePreference.displayName)
-                        PreferenceRow(label: "Mood", value: preferences.emotionPreference.displayName)
-                    } else if viewModel.isLoading {
+                    if viewModel.isLoading {
                         HStack {
                             ProgressView()
                                 .scaleEffect(0.8)
                             Text("Loading...")
                                 .foregroundColor(.secondary)
+                        }
+                    } else if let gender = selectedGender, let genre = selectedGenre, let emotion = selectedEmotion {
+                        // Gender Picker
+                        Picker("Gender", selection: $selectedGender) {
+                            ForEach(User.Gender.allCases, id: \.self) { genderOption in
+                                Text(genderOption.displayName).tag(genderOption as User.Gender?)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: selectedGender) { _, newGender in
+                            Task {
+                                await updatePreferences()
+                            }
+                        }
+
+                        // Genre Picker
+                        Picker("Genre", selection: $selectedGenre) {
+                            ForEach(User.Genre.allCases, id: \.self) { genreOption in
+                                Text(genreOption.displayName).tag(genreOption as User.Genre?)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .onChange(of: selectedGenre) { _, newGenre in
+                            Task {
+                                await updatePreferences()
+                            }
+                        }
+
+                        // Mood/Emotion Picker
+                        Picker("Mood", selection: $selectedEmotion) {
+                            ForEach(User.Emotion.allCases, id: \.self) { emotionOption in
+                                Text(emotionOption.displayName).tag(emotionOption as User.Emotion?)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .onChange(of: selectedEmotion) { _, newEmotion in
+                            Task {
+                                await updatePreferences()
+                            }
+                        }
+
+                        if isUpdatingPreferences {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Updating...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                 }
@@ -189,16 +229,6 @@ struct ProfileView: View {
                 // Actions Section
                 Section("Settings") {
                     Button(action: {
-                        showingEditPreferences = true
-                    }) {
-                        HStack {
-                            Image(systemName: "slider.horizontal.3")
-                            Text("Edit Preferences")
-                        }
-                    }
-                    .foregroundColor(.primary)
-
-                    Button(action: {
                         // TODO: Implement about page
                     }) {
                         HStack {
@@ -222,37 +252,30 @@ struct ProfileView: View {
                 }
             }
             .navigationTitle("Profile")
+            .onChange(of: selectedPhotoItem) { _, newItem in
+                Task {
+                    await handlePhotoSelection(newItem)
+                }
+            }
             .task {
                 // Inject authManager reference
                 viewModel.authManager = authManager
                 if let token = authManager.getAuthToken() {
                     await viewModel.loadPreferences(token: token)
                     await viewModel.loadUserPhotos(token: token)
+
+                    // Load current preferences into state
+                    if let preferences = viewModel.userPreferences {
+                        selectedGender = preferences.gender
+                        selectedGenre = preferences.genrePreference
+                        selectedEmotion = preferences.emotionPreference
+                    }
                 }
             }
             .alert("Alert", isPresented: $showingPhotoAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(photoAlertMessage)
-            }
-            .sheet(isPresented: $showingEditPreferences) {
-                if let preferences = viewModel.userPreferences {
-                    EditPreferencesView(
-                        currentPreferences: preferences,
-                        onSave: { gender, genre, emotion in
-                            Task {
-                                if let token = authManager.getAuthToken() {
-                                    await viewModel.updatePreferences(
-                                        gender: gender,
-                                        genrePreference: genre,
-                                        emotionPreference: emotion,
-                                        token: token
-                                    )
-                                }
-                            }
-                        }
-                    )
-                }
             }
             .alert("Log Out", isPresented: $showingLogoutAlert) {
                 Button("Cancel", role: .cancel) { }
@@ -288,6 +311,13 @@ struct ProfileView: View {
     private func handlePhotoSelection(_ item: PhotosPickerItem?) async {
         guard let item = item else { return }
 
+        // Prevent duplicate uploads
+        guard !isUploadingPhoto else {
+            print("⚠️  Upload already in progress, ignoring duplicate selection")
+            selectedPhotoItem = nil
+            return
+        }
+
         do {
             if let data = try await item.loadTransferable(type: Data.self) {
                 if let token = authManager.getAuthToken() {
@@ -306,84 +336,22 @@ struct ProfileView: View {
 
         selectedPhotoItem = nil
     }
-}
 
-struct PreferenceRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Text(label)
-            Spacer()
-            Text(value)
-                .foregroundColor(.secondary)
+    private func updatePreferences() async {
+        guard let gender = selectedGender,
+              let genre = selectedGenre,
+              let emotion = selectedEmotion,
+              let token = authManager.getAuthToken() else {
+            return
         }
-    }
-}
 
-struct EditPreferencesView: View {
-    @Environment(\.dismiss) var dismiss
-    let currentPreferences: UserPreferences
-    let onSave: (User.Gender?, User.Genre?, User.Emotion?) -> Void
-
-    @State private var selectedGender: User.Gender
-    @State private var selectedGenre: User.Genre
-    @State private var selectedEmotion: User.Emotion
-
-    init(currentPreferences: UserPreferences, onSave: @escaping (User.Gender?, User.Genre?, User.Emotion?) -> Void) {
-        self.currentPreferences = currentPreferences
-        self.onSave = onSave
-        _selectedGender = State(initialValue: currentPreferences.gender)
-        _selectedGenre = State(initialValue: currentPreferences.genrePreference)
-        _selectedEmotion = State(initialValue: currentPreferences.emotionPreference)
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Gender") {
-                    Picker("Gender", selection: $selectedGender) {
-                        ForEach(User.Gender.allCases, id: \.self) { gender in
-                            Text(gender.displayName).tag(gender)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                Section("Genre") {
-                    Picker("Genre", selection: $selectedGenre) {
-                        ForEach(User.Genre.allCases, id: \.self) { genre in
-                            Text(genre.displayName).tag(genre)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                }
-
-                Section("Mood") {
-                    Picker("Mood", selection: $selectedEmotion) {
-                        ForEach(User.Emotion.allCases, id: \.self) { emotion in
-                            Text(emotion.displayName).tag(emotion)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                }
-            }
-            .navigationTitle("Edit Preferences")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
-                        onSave(selectedGender, selectedGenre, selectedEmotion)
-                        dismiss()
-                    }
-                }
-            }
-        }
+        isUpdatingPreferences = true
+        await viewModel.updatePreferences(
+            gender: gender,
+            genrePreference: genre,
+            emotionPreference: emotion,
+            token: token
+        )
+        isUpdatingPreferences = false
     }
 }

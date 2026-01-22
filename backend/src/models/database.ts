@@ -1,13 +1,17 @@
-import { Pool, PoolClient, QueryResult } from 'pg';
+import Database from 'better-sqlite3';
+import path from 'path';
 
-// Create connection pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-});
+// Get database path from environment or use default
+const dbPath = process.env.DB_PATH || path.join(__dirname, '../../data/database.db');
+
+// Create database connection
+const db = new Database(dbPath);
+
+// Enable foreign keys
+db.pragma('foreign_keys = ON');
+
+// Use WAL mode for better concurrency
+db.pragma('journal_mode = WAL');
 
 // Type exports
 export interface User {
@@ -61,64 +65,98 @@ export interface ContentGeneration {
 // Database connection check
 export async function checkDatabaseConnection(): Promise<boolean> {
   try {
-    // Log the DATABASE_URL for debugging (hide password)
-    const dbUrl = process.env.DATABASE_URL || '';
-    const safeUrl = dbUrl.replace(/:[^:@]+@/, ':****@');
-    console.log('DATABASE_URL (safe):', safeUrl);
-    console.log('DATABASE_URL length:', dbUrl.length);
+    console.log('SQLite database path:', dbPath);
 
-    const client = await pool.connect();
-    await client.query('SELECT 1');
-    client.release();
+    // Test query
+    db.prepare('SELECT 1').get();
+
+    console.log('✅ Database connection successful');
     return true;
   } catch (error) {
-    console.error('Database connection failed:', error);
+    console.error('❌ Database connection failed:', error);
     return false;
   }
 }
 
 // Graceful shutdown
 export async function disconnectDatabase(): Promise<void> {
-  await pool.end();
+  db.close();
+  console.log('Database connection closed');
 }
 
+// Type helper for query results
+type Row<T> = T & any;
+
 // Helper function to run a query
-async function query<T = any>(text: string, params?: any[]): Promise<QueryResult<any>> {
+export function queryAll<T = any>(sql: string, params: any[] = []): Row<T>[] {
   const start = Date.now();
   try {
-    const res = await pool.query(text, params);
+    const stmt = db.prepare(sql);
+    const rows = stmt.all(...params) as Row<T>[];
     const duration = Date.now() - start;
-    console.log('Executed query', { text, duration, rows: res.rowCount });
-    return res;
+    console.log('Executed query', { sql, duration, rows: rows.length });
+    return rows;
   } catch (error) {
-    console.error('Database query error', { text, error });
+    console.error('Database query error', { sql, error });
+    throw error;
+  }
+}
+
+export function queryGet<T = any>(sql: string, params: any[] = []): Row<T> | undefined {
+  const start = Date.now();
+  try {
+    const stmt = db.prepare(sql);
+    const row = stmt.get(...params) as Row<T> | undefined;
+    const duration = Date.now() - start;
+    console.log('Executed query', { sql, duration, row: row ? 'found' : 'not found' });
+    return row;
+  } catch (error) {
+    console.error('Database query error', { sql, error });
+    throw error;
+  }
+}
+
+function queryRun(sql: string, params: any[] = []): { lastInsertRowid: number; changes: number } {
+  const start = Date.now();
+  try {
+    const stmt = db.prepare(sql);
+    const result = stmt.run(...params);
+    const duration = Date.now() - start;
+    console.log('Executed query', { sql, duration, changes: result.changes });
+    // Convert bigint to number for compatibility
+    return {
+      lastInsertRowid: Number(result.lastInsertRowid),
+      changes: result.changes
+    };
+  } catch (error) {
+    console.error('Database query error', { sql, error });
     throw error;
   }
 }
 
 // User queries
 export async function getUserById(id: string): Promise<User | null> {
-  const res = await query<User>(
-    'SELECT * FROM users WHERE id = $1',
+  const row = queryGet<User>(
+    'SELECT * FROM users WHERE id = ?',
     [id]
   );
-  return res.rows[0] || null;
+  return row || null;
 }
 
 export async function getUserByEmail(email: string): Promise<User | null> {
-  const res = await query<User>(
-    'SELECT * FROM users WHERE email = $1',
+  const row = queryGet<User>(
+    'SELECT * FROM users WHERE email = ?',
     [email]
   );
-  return res.rows[0] || null;
+  return row || null;
 }
 
 export async function getUserByAnonymousId(anonymousId: string): Promise<User | null> {
-  const res = await query<User>(
-    'SELECT * FROM users WHERE anonymous_id = $1',
+  const row = queryGet<User>(
+    'SELECT * FROM users WHERE anonymous_id = ?',
     [anonymousId]
   );
-  return res.rows[0] || null;
+  return row || null;
 }
 
 export async function createUser(data: {
@@ -130,48 +168,47 @@ export async function createUser(data: {
   emotion_preference?: string;
 }): Promise<User> {
   const id = data.id || generateId();
-  const res = await query<User>(
+  queryRun(
     `INSERT INTO users (id, email, anonymous_id, gender, genre_preference, emotion_preference)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING *`,
+     VALUES (?, ?, ?, ?, ?, ?)`,
     [id, data.email || null, data.anonymous_id || null, data.gender || null, data.genre_preference || null, data.emotion_preference || null]
   );
-  return res.rows[0];
+  const row = queryGet<User>('SELECT * FROM users WHERE id = ?', [id]);
+  if (!row) throw new Error('Failed to create user');
+  return row;
 }
 
 export async function updateUser(id: string, data: Partial<User>): Promise<User | null> {
   const fields: string[] = [];
   const values: any[] = [];
-  let paramIndex = 1;
 
   for (const [key, value] of Object.entries(data)) {
     if (value !== undefined && key !== 'id' && key !== 'created_at' && key !== 'updated_at') {
-      fields.push(`${key} = $${paramIndex}`);
+      fields.push(`${key} = ?`);
       values.push(value);
-      paramIndex++;
     }
   }
 
   if (fields.length === 0) return getUserById(id);
 
   values.push(id);
-  const res = await query<User>(
-    `UPDATE users SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+  queryRun(
+    `UPDATE users SET ${fields.join(', ')} WHERE id = ?`,
     values
   );
-  return res.rows[0] || null;
+  return getUserById(id);
 }
 
 // Daily Content queries
 export async function getDailyContent(userId: string, date: string): Promise<DailyContent | null> {
-  const res = await query<DailyContent>(
+  const row = queryGet<DailyContent>(
     `SELECT dc.*, f.rating as feedback
      FROM daily_contents dc
      LEFT JOIN feedback f ON f.content_id = dc.id
-     WHERE dc.user_id = $1 AND dc.date = $2`,
+     WHERE dc.user_id = ? AND dc.date = ?`,
     [userId, date]
   );
-  return res.rows[0] || null;
+  return row || null;
 }
 
 export async function createDailyContent(data: {
@@ -181,77 +218,84 @@ export async function createDailyContent(data: {
   date: string;
 }): Promise<DailyContent> {
   const id = generateId();
-  const res = await query<DailyContent>(
+  queryRun(
     `INSERT INTO daily_contents (id, user_id, text, image_url, date)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING *`,
+     VALUES (?, ?, ?, ?, ?)`,
     [id, data.user_id, data.text, data.image_url, data.date]
   );
-  return res.rows[0];
+  const row = queryGet<DailyContent>('SELECT * FROM daily_contents WHERE id = ?', [id]);
+  if (!row) throw new Error('Failed to create daily content');
+  return row;
 }
 
 export async function updateDailyContent(id: string, data: Partial<DailyContent>): Promise<DailyContent | null> {
   const fields: string[] = [];
   const values: any[] = [];
-  let paramIndex = 1;
 
   for (const [key, value] of Object.entries(data)) {
     if (value !== undefined && key !== 'id' && key !== 'created_at') {
-      fields.push(`${key} = $${paramIndex}`);
+      fields.push(`${key} = ?`);
       values.push(value);
-      paramIndex++;
     }
   }
 
   if (fields.length === 0) return null;
 
   values.push(id);
-  const res = await query<DailyContent>(
-    `UPDATE daily_contents SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+  queryRun(
+    `UPDATE daily_contents SET ${fields.join(', ')} WHERE id = ?`,
     values
   );
-  return res.rows[0] || null;
+  // Get updated content by ID only (no userId filter needed after update)
+  const row = queryGet<DailyContent>(
+    `SELECT dc.*, f.rating as feedback
+     FROM daily_contents dc
+     LEFT JOIN feedback f ON f.content_id = dc.id
+     WHERE dc.id = ?`,
+    [id]
+  );
+  return row || null;
 }
 
 export async function getDailyContentsBeforeDate(userId: string, date: string, limit: number): Promise<DailyContent[]> {
-  const res = await query<DailyContent>(
+  const rows = queryAll<DailyContent>(
     `SELECT dc.*, f.rating as feedback
      FROM daily_contents dc
      LEFT JOIN feedback f ON f.content_id = dc.id
-     WHERE dc.user_id = $1 AND dc.date < $2
+     WHERE dc.user_id = ? AND dc.date < ?
      ORDER BY dc.date DESC
-     LIMIT $3`,
+     LIMIT ?`,
     [userId, date, limit]
   );
-  return res.rows;
+  return rows;
 }
 
 export async function getDailyContentByIdAndUser(contentId: string, userId: string): Promise<DailyContent | null> {
-  const res = await query<DailyContent>(
+  const row = queryGet<DailyContent>(
     `SELECT dc.*, f.rating as feedback
      FROM daily_contents dc
      LEFT JOIN feedback f ON f.content_id = dc.id
-     WHERE dc.id = $1 AND dc.user_id = $2`,
+     WHERE dc.id = ? AND dc.user_id = ?`,
     [contentId, userId]
   );
-  return res.rows[0] || null;
+  return row || null;
 }
 
 export async function verifyContentOwnership(contentId: string, userId: string): Promise<boolean> {
-  const res = await query(
-    'SELECT id FROM daily_contents WHERE id = $1 AND user_id = $2',
+  const row = queryGet(
+    'SELECT id FROM daily_contents WHERE id = ? AND user_id = ?',
     [contentId, userId]
   );
-  return (res.rowCount || 0) > 0;
+  return row !== undefined;
 }
 
 // Feedback queries
 export async function getFeedbackByContentId(contentId: string): Promise<Feedback | null> {
-  const res = await query<Feedback>(
-    'SELECT * FROM feedback WHERE content_id = $1',
+  const row = queryGet<Feedback>(
+    'SELECT * FROM feedback WHERE content_id = ?',
     [contentId]
   );
-  return res.rows[0] || null;
+  return row || null;
 }
 
 export async function createFeedback(data: {
@@ -259,22 +303,23 @@ export async function createFeedback(data: {
   rating: string;
 }): Promise<Feedback> {
   const id = generateId();
-  const res = await query<Feedback>(
+  queryRun(
     `INSERT INTO feedback (id, content_id, rating)
-     VALUES ($1, $2, $3)
-     RETURNING *`,
+     VALUES (?, ?, ?)`,
     [id, data.content_id, data.rating]
   );
-  return res.rows[0];
+  const row = queryGet<Feedback>('SELECT * FROM feedback WHERE id = ?', [id]);
+  if (!row) throw new Error('Failed to create feedback');
+  return row;
 }
 
 // User Photo queries
 export async function getUserPhotos(userId: string): Promise<UserPhoto[]> {
-  const res = await query<UserPhoto>(
-    'SELECT * FROM user_photos WHERE user_id = $1 AND is_active = 1 ORDER BY created_at DESC',
+  const rows = queryAll<UserPhoto>(
+    'SELECT * FROM user_photos WHERE user_id = ? AND is_active = 1 ORDER BY created_at DESC',
     [userId]
   );
-  return res.rows;
+  return rows;
 }
 
 export async function createUserPhoto(data: {
@@ -282,36 +327,37 @@ export async function createUserPhoto(data: {
   photo_url: string;
 }): Promise<UserPhoto> {
   const id = generateId();
-  const res = await query<UserPhoto>(
+  queryRun(
     `INSERT INTO user_photos (id, user_id, photo_url)
-     VALUES ($1, $2, $3)
-     RETURNING *`,
+     VALUES (?, ?, ?)`,
     [id, data.user_id, data.photo_url]
   );
-  return res.rows[0];
+  const row = queryGet<UserPhoto>('SELECT * FROM user_photos WHERE id = ?', [id]);
+  if (!row) throw new Error('Failed to create user photo');
+  return row;
 }
 
 export async function deactivateUserPhotos(userId: string): Promise<void> {
-  await query(
-    'UPDATE user_photos SET is_active = 0 WHERE user_id = $1',
+  queryRun(
+    'UPDATE user_photos SET is_active = 0 WHERE user_id = ?',
     [userId]
   );
 }
 
 export async function deactivateUserPhoto(photoId: string): Promise<void> {
-  await query(
-    'UPDATE user_photos SET is_active = 0 WHERE id = $1',
+  queryRun(
+    'UPDATE user_photos SET is_active = 0 WHERE id = ?',
     [photoId]
   );
 }
 
 // Content Generation queries
 export async function getContentGeneration(userId: string, date: string): Promise<ContentGeneration | null> {
-  const res = await query<ContentGeneration>(
-    'SELECT * FROM content_generations WHERE user_id = $1 AND generated_date = $2',
+  const row = queryGet<ContentGeneration>(
+    'SELECT * FROM content_generations WHERE user_id = ? AND generated_date = ?',
     [userId, date]
   );
-  return res.rows[0] || null;
+  return row || null;
 }
 
 export async function createContentGeneration(data: {
@@ -319,18 +365,19 @@ export async function createContentGeneration(data: {
   generated_date: string;
 }): Promise<ContentGeneration> {
   const id = generateId();
-  const res = await query<ContentGeneration>(
+  queryRun(
     `INSERT INTO content_generations (id, user_id, generated_date)
-     VALUES ($1, $2, $3)
-     RETURNING *`,
+     VALUES (?, ?, ?)`,
     [id, data.user_id, data.generated_date]
   );
-  return res.rows[0];
+  const row = queryGet<ContentGeneration>('SELECT * FROM content_generations WHERE id = ?', [id]);
+  if (!row) throw new Error('Failed to create content generation');
+  return row;
 }
 
 // Initialize database tables
 export async function initializeDatabase(): Promise<void> {
-  await query(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE,
@@ -347,7 +394,7 @@ export async function initializeDatabase(): Promise<void> {
     );
   `);
 
-  await query(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS daily_contents (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -361,7 +408,7 @@ export async function initializeDatabase(): Promise<void> {
     );
   `);
 
-  await query(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS feedback (
       id TEXT PRIMARY KEY,
       content_id TEXT UNIQUE NOT NULL,
@@ -371,7 +418,7 @@ export async function initializeDatabase(): Promise<void> {
     );
   `);
 
-  await query(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS user_photos (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -382,7 +429,7 @@ export async function initializeDatabase(): Promise<void> {
     );
   `);
 
-  await query(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS content_generations (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -393,7 +440,7 @@ export async function initializeDatabase(): Promise<void> {
     );
   `);
 
-  console.log('Database tables initialized');
+  console.log('✅ Database tables initialized');
 }
 
 // Helper function to generate UUID
@@ -405,5 +452,5 @@ function generateId(): string {
   });
 }
 
-// Export the pool for transactions
-export { pool };
+// Export the database instance for transactions
+export { db };

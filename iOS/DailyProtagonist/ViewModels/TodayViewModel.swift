@@ -5,6 +5,7 @@ class TodayViewModel: ObservableObject {
     @Published var todayContent: DailyContent?
     @Published var isLoading = false
     @Published var isGenerating = false
+    @Published var isGeneratingPortrait = false
     @Published var errorMessage: String?
     @Published var hasContentToday = false
     @Published var showDailyLimitAlert = false
@@ -14,6 +15,8 @@ class TodayViewModel: ObservableObject {
 
     private let apiService = APIService.shared
     weak var authManager: AuthManager?
+    weak var subscriptionManager: SubscriptionManager?
+    weak var dailyImageViewModel: DailyImageViewModel?
 
     func loadTodayContent(token: String) async {
         isLoading = true
@@ -41,7 +44,7 @@ class TodayViewModel: ObservableObject {
                 }
             } else if case .httpError(404) = error {
                 hasContentToday = false
-                errorMessage = "今日内容尚未送达，请稍后再来"
+                errorMessage = "No content available yet, please check back later"
             } else if case .noContent(let resp) = error {
                 hasContentToday = false
                 remainingGenerations = resp.remainingGenerations
@@ -90,6 +93,23 @@ class TodayViewModel: ObservableObject {
 
         print("🟢 Generating new content...")
 
+        // Sync premium status with backend before generating
+        if let subscriptionManager = subscriptionManager, subscriptionManager.isPremium {
+            print("⭐ Syncing premium status to backend...")
+            do {
+                _ = try await apiService.updateSubscriptionStatus(
+                    isPremium: true,
+                    expirationDate: nil,
+                    token: token
+                )
+                print("✅ Premium status synced to backend")
+                // Small delay to let backend process
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            } catch {
+                print("⚠️ Failed to sync premium status: \(error)")
+            }
+        }
+
         do {
             let content = try await apiService.generateContent(token: token)
             print("🟢 Content generated successfully!")
@@ -99,10 +119,18 @@ class TodayViewModel: ObservableObject {
         } catch let error as APIError {
             print("❌ API Error: \(error.localizedDescription)")
             if case .httpError(429) = error {
-                showDailyLimitAlert = true
-                showUpgradeAlert = true
+                // Check if user is premium (local subscription manager)
+                if let subscriptionManager = subscriptionManager, subscriptionManager.isPremium {
+                    // Premium users - backend still limiting them
+                    print("⭐ Premium user hit limit - backend doesn't recognize premium status yet")
+                    errorMessage = "Premium feature: The backend needs to be updated to recognize your premium status. In production, you'll have unlimited access."
+                } else {
+                    // Free users - show upgrade alert
+                    showDailyLimitAlert = true
+                    showUpgradeAlert = true
+                }
             } else if case .httpError(400) = error {
-                errorMessage = "今日内容已生成"
+                errorMessage = "Daily content already generated"
             } else {
                 errorMessage = error.localizedDescription
             }
@@ -112,5 +140,71 @@ class TodayViewModel: ObservableObject {
         }
 
         isGenerating = false
+    }
+
+    /// Combined premium feature: Generate new story AND personalized portrait
+    func generateStoryWithPortrait(token: String) async {
+        isGenerating = true
+        isGeneratingPortrait = true
+        errorMessage = nil
+
+        print("🎨 Generating new story with personalized portrait...")
+
+        // Sync premium status with backend before generating
+        if let subscriptionManager = subscriptionManager, subscriptionManager.isPremium {
+            print("⭐ Syncing premium status to backend...")
+            do {
+                _ = try await apiService.updateSubscriptionStatus(
+                    isPremium: true,
+                    expirationDate: nil,
+                    token: token
+                )
+                print("✅ Premium status synced to backend")
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            } catch {
+                print("⚠️ Failed to sync premium status: \(error)")
+            }
+        }
+
+        do {
+            // Step 1: Generate new story content
+            print("📝 Step 1: Generating new story...")
+            let content = try await apiService.generateContent(token: token)
+            print("🟢 Story generated: \(content.text.prefix(50))...")
+            todayContent = content
+            hasContentToday = true
+
+            // Step 2: Generate personalized portrait with user's face
+            print("🎭 Step 2: Generating personalized portrait...")
+            if let dailyImageViewModel = dailyImageViewModel {
+                // The daily image service will use the user's registered face photo
+                await dailyImageViewModel.generateImage(storyText: content.text)
+                print("🟢 Portrait generation initiated")
+            } else {
+                print("⚠️ DailyImageViewModel not available")
+            }
+
+            print("✅ Premium content generated successfully!")
+        } catch let error as APIError {
+            print("❌ API Error: \(error.localizedDescription)")
+            if case .httpError(429) = error {
+                if let subscriptionManager = subscriptionManager, subscriptionManager.isPremium {
+                    errorMessage = "Premium feature: The backend needs to recognize your premium status."
+                } else {
+                    showDailyLimitAlert = true
+                    showUpgradeAlert = true
+                }
+            } else if case .httpError(400) = error {
+                errorMessage = "Daily content already generated"
+            } else {
+                errorMessage = error.localizedDescription
+            }
+        } catch {
+            print("❌ Error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+
+        isGenerating = false
+        isGeneratingPortrait = false
     }
 }

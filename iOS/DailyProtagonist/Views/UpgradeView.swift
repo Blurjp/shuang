@@ -4,20 +4,72 @@ import StoreKit
 struct UpgradeView: View {
     @Binding var isPresented: Bool
     @EnvironmentObject var authManager: AuthManager
-    @StateObject private var subscriptionManager = SubscriptionManager.shared
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
 
-    @State private var selectedProduct: SKProduct?
+    @State private var selectedTier: SubscriptionTier?
     @State private var isLoadingPurchase = false
+
+    enum SubscriptionTier: String, CaseIterable {
+        case monthly = "com.dailyprotagonist.premium.monthly"
+        case yearly = "com.dailyprotagonist.premium.yearly"
+
+        var displayName: String {
+            switch self {
+            case .monthly: return "Monthly Premium"
+            case .yearly: return "Yearly Premium"
+            }
+        }
+
+        var description: String {
+            switch self {
+            case .monthly: return "Billed monthly"
+            case .yearly: return "Billed yearly, save 33%"
+            }
+        }
+
+        var price: String {
+            switch self {
+            case .monthly: return "$9.99/mo"
+            case .yearly: return "$79.99/yr"
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 24) {
-                    headerView
-                    featuresView
-                    subscriptionOptionsView
-                    Spacer()
-                    ctaView
+            ZStack(alignment: .top) {
+                ScrollView {
+                    VStack(spacing: 24) {
+                        headerView
+                        featuresView
+                        subscriptionOptionsView
+                        Spacer()
+                        ctaView
+                    }
+                }
+
+                // Debug mode banner
+                if subscriptionManager.products.isEmpty {
+                    HStack {
+                        Image(systemName: "wrench.and.screwdriver.fill")
+                            .font(.caption)
+                        Text("DEBUG MODE - Tap Subscribe to Upgrade for Free")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.purple, Color.pink]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(20)
+                    .shadow(radius: 5)
+                    .padding(.top, 8)
                 }
             }
             .navigationTitle("Premium")
@@ -41,8 +93,8 @@ struct UpgradeView: View {
             .task {
                 await subscriptionManager.loadProducts()
                 // Auto-select monthly tier
-                if let monthlyProduct = subscriptionManager.products.first(where: { $0.productIdentifier.contains("monthly") }) {
-                    selectedProduct = monthlyProduct
+                if subscriptionManager.products.isEmpty || subscriptionManager.products.contains(where: { $0.productIdentifier.contains("monthly") }) {
+                    selectedTier = .monthly
                 }
             }
         }
@@ -80,25 +132,35 @@ struct UpgradeView: View {
     }
 
     private var subscriptionOptionsView: some View {
-        Group {
-            if !subscriptionManager.products.isEmpty {
-                VStack(spacing: 12) {
-                    ForEach(subscriptionManager.products, id: \.productIdentifier) { product in
-                        SubscriptionOptionRow(
-                            product: product,
-                            isSelected: selectedProduct?.productIdentifier == product.productIdentifier
-                        ) {
-                            selectedProduct = product
-                        }
-                    }
+        VStack(spacing: 12) {
+            ForEach(SubscriptionTier.allCases, id: \.rawValue) { tier in
+                SubscriptionOptionRow(
+                    tier: tier,
+                    isSelected: selectedTier == tier
+                ) {
+                    selectedTier = tier
                 }
-                .padding(.horizontal)
             }
         }
+        .padding(.horizontal)
     }
 
     private var ctaView: some View {
         VStack(spacing: 12) {
+            // Show error message if any
+            if let error = subscriptionManager.errorMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.red)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+                .padding()
+                .background(Color.red.opacity(0.1))
+                .cornerRadius(8)
+            }
+
             if isLoadingPurchase || subscriptionManager.isLoading {
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
@@ -119,8 +181,8 @@ struct UpgradeView: View {
                         )
                         .cornerRadius(12)
                 }
-                .disabled(selectedProduct == nil)
-                .opacity(selectedProduct == nil ? 0.6 : 1)
+                .disabled(selectedTier == nil)
+                .opacity(selectedTier == nil ? 0.6 : 1)
             }
 
             Text("Cancel anytime, no hidden fees")
@@ -141,29 +203,42 @@ struct UpgradeView: View {
     }
 
     private var buttonText: String {
-        if let product = selectedProduct {
-            let priceString = product.priceLocale.currencySymbol ?? "$"
-            let price = product.price.stringValue
-            return "Subscribe \(priceString)\(price)"
+        guard let tier = selectedTier else {
+            return "Select a Plan"
         }
-        return "Select a Plan"
+        return "Subscribe \(tier.price)"
     }
 
     private func purchaseSubscription() {
-        guard let product = selectedProduct else { return }
+        guard let tier = selectedTier else { return }
 
-        Task {
-            isLoadingPurchase = true
-            do {
-                try await subscriptionManager.purchase(product)
-                // Success
+        // If we have real StoreKit products, use them
+        if let product = subscriptionManager.products.first(where: { $0.productIdentifier == tier.rawValue }) {
+            Task {
+                isLoadingPurchase = true
+                do {
+                    try await subscriptionManager.purchase(product)
+                    await MainActor.run {
+                        isPresented = false
+                    }
+                } catch {
+                    // Error already handled by subscriptionManager
+                }
+                isLoadingPurchase = false
+            }
+        } else {
+            // Development mode - simulate upgrade without StoreKit
+            Task {
+                isLoadingPurchase = true
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // Simulate network call
                 await MainActor.run {
+                    // Set premium status directly in dev mode
+                    subscriptionManager.isPremium = true
+                    subscriptionManager.subscriptionStatus = .subscribed(expirationDate: nil)
+                    isLoadingPurchase = false
                     isPresented = false
                 }
-            } catch {
-                // Error is already handled by SubscriptionManager
             }
-            isLoadingPurchase = false
         }
     }
 }
@@ -203,7 +278,7 @@ struct FeatureRow: View {
 }
 
 struct SubscriptionOptionRow: View {
-    let product: SKProduct
+    let tier: UpgradeView.SubscriptionTier
     let isSelected: Bool
     let onTap: () -> Void
 
@@ -211,24 +286,25 @@ struct SubscriptionOptionRow: View {
         Button(action: onTap) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(displayName)
+                    Text(tier.displayName)
                         .font(.headline)
                         .foregroundColor(.primary)
 
-                    Text(description)
+                    Text(tier.description)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 Spacer()
 
-                Text(displayPrice)
+                Text(tier.price)
                     .font(.headline)
                     .foregroundColor(.blue)
 
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
+                        .font(.title3)
                 }
             }
             .padding()
@@ -242,30 +318,6 @@ struct SubscriptionOptionRow: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
-    }
-
-    private var displayName: String {
-        if product.productIdentifier.contains("monthly") {
-            return "Monthly Premium"
-        } else if product.productIdentifier.contains("yearly") {
-            return "Yearly Premium"
-        }
-        return product.localizedTitle
-    }
-
-    private var description: String {
-        if product.productIdentifier.contains("monthly") {
-            return "Billed monthly"
-        } else if product.productIdentifier.contains("yearly") {
-            return "Billed yearly, save 33%"
-        }
-        return product.localizedDescription
-    }
-
-    private var displayPrice: String {
-        let priceString = product.priceLocale.currencySymbol ?? "$"
-        let price = product.price.stringValue
-        return "\(priceString)\(price)"
     }
 }
 

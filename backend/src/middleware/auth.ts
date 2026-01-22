@@ -4,6 +4,7 @@ import { getUserById } from '../models/database';
 
 export interface AuthRequest extends Request {
   userId?: string;
+  rateLimitCache?: Record<string, { timestamp: number }>;
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';

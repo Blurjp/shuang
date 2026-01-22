@@ -3,17 +3,24 @@ import Foundation
 class APIService {
     static let shared = APIService()
 
-    private let baseURL = "https://backend-production-61f4.up.railway.app/api"
-    private let session: URLSession
+    // Backend URL - can switch between local and production
+    // Set to true to use Railway backend even in DEBUG mode
+    private let useProduction = false
 
-    // For local development, use your Mac's local IP instead of localhost
-    // private let baseURL = "http://100.65.161.157:3000/api"
-    // private let baseURL = "http://localhost:3000/api"
+    private var baseURL: String {
+        #if DEBUG
+        return useProduction ? "https://backend-production-61f4.up.railway.app/api" : "http://localhost:3000/api"
+        #else
+        return "https://backend-production-61f4.up.railway.app/api"
+        #endif
+    }
+
+    private let session: URLSession
 
     private init() {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
+        config.timeoutIntervalForRequest = 120  // 2 minutes for content generation with DALL-E
+        config.timeoutIntervalForResource = 180  // 3 minutes total
         config.httpMaximumConnectionsPerHost = 1
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.urlCache = nil
@@ -34,7 +41,8 @@ class APIService {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 30
+        // Keep per-request timeout aligned with session configuration.
+        request.timeoutInterval = session.configuration.timeoutIntervalForRequest
 
         if let token = token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
