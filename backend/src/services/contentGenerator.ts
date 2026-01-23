@@ -2,6 +2,7 @@ import { User } from '../models/database';
 import { analyzeStory, Scene } from './sceneGenerator';
 import { openaiImageEditService } from './openaiImageEdit';
 import { getPersonalizedSuggestions } from './feedbackAnalyzer';
+import { imageGeneratorV2, type ImageGenerationResult } from './imageGeneratorV2';
 
 /**
  * Extract actual URL from photo_url field which can be:
@@ -506,14 +507,14 @@ export class ContentGenerator {
   }
 
   /**
-   * Generate image using Scene-based approach with OpenAI Image Edit API
-   * Priority: OpenAI Image Edit (with user photo) > DALL-E (fallback)
+   * Generate image using Scene-based approach with Multi-Provider strategy
+   * Priority: Replicate PhotoMaker (primary) > OpenAI gpt-image-1 (fallback) > DALL-E 3 (last resort)
    */
   async generateImage(storyText: string, user: User, userPhotoUrl?: string): Promise<string> {
     // Reload environment variables
     this.reloadEnv();
 
-    console.log(`🎨 Generating image with Scene-based approach...`);
+    console.log(`🎨 Generating image with Scene-based approach V2...`);
     console.log(`📸 User photo available: ${userPhotoUrl ? 'YES' : 'NO'}`);
 
     // STEP 1: Analyze story and generate safe scene
@@ -531,31 +532,37 @@ export class ContentGenerator {
     console.log(`💡 Lighting: ${scene.lighting.type}`);
     console.log(`😊 Emotion: ${scene.emotion}`);
 
-    // STEP 2: Generate image using OpenAI Image Edit API with reference photo
-    console.log(`\n=== STEP 2: Image Generation ===`);
+    // STEP 2: Generate image using multi-provider strategy
+    console.log(`\n=== STEP 2: Image Generation (V2 with PhotoMaker fallback) ===`);
 
     const actualPhotoUrl = userPhotoUrl ? extractPhotoUrl(userPhotoUrl) : null;
     console.log(`📸 Reference photo: ${actualPhotoUrl ? actualPhotoUrl.substring(0, 60) + '...' : 'none'}`);
 
+    // Use new imageGeneratorV2 with automatic provider fallback
     if (actualPhotoUrl && analysis.suggestedScene.isSafe) {
-      console.log(`✅ Using OpenAI Image Edit API with reference photo (gpt-image-1)...`);
+      console.log(`✅ Using imageGeneratorV2 (Replicate PhotoMaker > OpenAI gpt-image-1)...`);
       try {
         const userGender = (user.gender as 'male' | 'female') || 'male';
-        const imageUrl = await openaiImageEditService.generateImageWithIdentity(
-          actualPhotoUrl,
-          scene,
-          userGender
-        );
-        console.log(`✅ Image generated with gpt-image-1`);
-        return imageUrl;
+        const result: ImageGenerationResult = await imageGeneratorV2.generatePersonalizedImage({
+          userPhotoUrl: actualPhotoUrl,
+          scene: scene,
+          gender: userGender
+        });
+
+        console.log(`✅ Image generated successfully!`);
+        console.log(`📊 Provider: ${result.provider}`);
+        console.log(`⏱️  Generation time: ${result.generationTimeMs}ms`);
+        console.log(`💰 Estimated cost: $${result.costEstimate?.toFixed(4) || 'unknown'}`);
+
+        return result.imageUrl;
       } catch (error: any) {
-        console.error(`❌ gpt-image-1 failed:`, error?.message || error);
+        console.error(`❌ imageGeneratorV2 failed:`, error?.message || error);
         // Fall through to DALL-E 3
       }
     }
 
-    // Fallback to DALL-E 3
-    console.log(`🎨 Using DALL-E 3 fallback...`);
+    // Final fallback to DALL-E 3
+    console.log(`🎨 Using DALL-E 3 as final fallback...`);
     try {
       const userGender = (user.gender as 'male' | 'female') || 'male';
       const imageUrl = await this.generateWithDalle3(scene, userGender);
