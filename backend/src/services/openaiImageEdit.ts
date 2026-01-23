@@ -52,7 +52,45 @@ class OpenAIImageEditService {
       const { image, mask } = await downloadImageAsFile(userPhotoUrl);
 
       // Build the prompt with identity lock
-      const prompt = buildImagePromptWithIdentityLock(scene, userGender);
+      // Use stronger identity preservation for better face matching
+      const identityLock = `
+ABSOLUTE IDENTITY REQUIREMENTS - CRITICAL:
+1. The face MUST be IDENTICAL to the reference photo - EVERY feature must match
+2. EXACT SAME eye shape, size, color, iris pattern, eyelids
+3. EXACT SAME eyebrows - shape, thickness, color
+4. EXACT SAME nose - shape, size, bridge, nostrils
+5. EXACT SAME lips - shape, size, color
+6. EXACT SAME face shape - jawline, cheekbones, facial structure
+7. EXACT SAME hairstyle - hair type, color, style
+8. EXACT SAME skin tone - complexion, texture
+9. Preserve ALL distinctive features: glasses, freckles, moles, facial hair
+10. DO NOT beautify, DO NOT idealize, DO NOT make more handsome/pretty
+11. The person must be RECOGNIZABLE as the SAME PERSON from the reference photo
+12. If the face is not identical, the generation has FAILED
+`.trim();
+
+      const sceneDetail = `
+SCENE: ${scene.description}
+
+PORTRAIT SUBJECT: A ${(userGender === 'male' ? 'man' : 'woman')} with the EXACT IDENTICAL FACE from the reference photo
+ACTION: ${scene.camera.action || 'standing confidently'}
+
+ENVIRONMENT: ${scene.environment}
+ATMOSPHERE: ${scene.atmosphere}
+
+CAMERA SETTINGS: ${scene.camera.shot}, ${scene.camera.angle}, ${scene.camera.distance}
+LIGHTING: ${scene.lighting.type} - ${scene.lighting.quality}
+SUBJECT EXPRESSION: ${scene.emotion}
+`.trim();
+
+      const technicalSpec = `
+IMAGE QUALITY: Professional portrait photography, high detail, sharp focus on face
+STYLE: Photorealistic, cinematic, natural lighting
+IMPORTANT: Face must be clear, visible, and match reference photo exactly
+`.trim();
+
+      const prompt = `${identityLock}\n\n${sceneDetail}\n\n${technicalSpec}`;
+
       console.log(`📝 Prompt: ${prompt.substring(0, 150)}...`);
 
       // Read file buffers

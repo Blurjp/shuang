@@ -52,9 +52,9 @@ const CONFIG = {
     // Use specific version hash for tencentarc/photomaker
     model: 'tencentarc/photomaker:ddfc2b08d209f9fa8c1eca692712918bd449f695dabb4a958da31802a9570fe4',
     numSteps: 50,              // PhotoMaker recommends 50 steps
-    styleStrengthRatio: 20,    // 20-40 keeps more original appearance
-    guidanceScale: 7.5,
-    timeout: 300000,           // 5 minutes timeout (PhotoMaker can be slower)
+    styleStrengthRatio: 15,    // Minimum allowed = 15 (lower = more like original face)
+    guidanceScale: 5.0,        // LOWER = more faithful to input face
+    timeout: 300000,           // 5 minutes timeout
   },
 
   // OpenAI fallback configuration
@@ -136,7 +136,7 @@ export async function generatePersonalizedImage(
   console.log(`🎭 Scene: ${params.scene.description}`);
   console.log(`👤 Gender: ${params.gender}`);
 
-  // Strategy 1: Try Replicate PhotoMaker (better face consistency)
+  // Strategy 1: Try Replicate PhotoMaker first (faster, cheaper)
   for (let attempt = 1; attempt <= CONFIG.retry.maxAttempts; attempt++) {
     try {
       console.log(`🔄 Attempt ${attempt}/${CONFIG.retry.maxAttempts} with Replicate PhotoMaker...`);
@@ -166,6 +166,28 @@ export async function generatePersonalizedImage(
 
   // Strategy 2: Fallback to OpenAI gpt-image-1
   console.log('🔄 Replicate failed, falling back to OpenAI gpt-image-1...');
+  try {
+    const result = await openaiImageEditService.generateImageWithIdentity(
+      params.userPhotoUrl,
+      params.scene,
+      params.gender
+    );
+    const duration = Date.now() - startTime;
+    recordMetrics('openai', true, duration, CONFIG.costs.openai);
+
+    return {
+      imageUrl: result,
+      provider: 'openai',
+      generationTimeMs: duration,
+      costEstimate: CONFIG.costs.openai,
+    };
+  } catch (error) {
+    recordMetrics('openai', false, Date.now() - startTime);
+    console.error('❌ All providers failed. Last error:', error);
+    throw new Error(
+      `Image generation failed. Replicate error: ${error instanceof Error ? error.message : 'Unknown'}`
+    );
+  }
   try {
     const result = await openaiImageEditService.generateImageWithIdentity(
       params.userPhotoUrl,
@@ -308,9 +330,9 @@ async function generateWithReplicate(
 function buildPhotoMakerPrompt(scene: Scene, gender: 'male' | 'female'): string {
   const genderTerm = gender === 'male' ? 'man' : 'woman';
 
-  // PhotoMaker-specific prompt structure with "img" trigger word
-  // The "img" keyword tells PhotoMaker where to place the face
-  const identitySection = `A photo of a ${genderTerm} img with the exact same face as the reference image.`;
+  // CRITICAL: Put "img" immediately after the subject for best face matching
+  // Format: "a img [noun]" triggers PhotoMaker to use the reference face
+  const identitySection = `A photo of a img ${genderTerm} with IDENTICAL face to the reference photo. MUST preserve: exact same eye shape, eye color, eyebrows, nose, lips, face shape, hairstyle, skin tone.`;
 
   const sceneSection = `
 ${scene.description}
@@ -326,6 +348,7 @@ Mood: ${scene.emotion} expression, ${scene.atmosphere}
 Professional photography, high quality, detailed, realistic.
 DSLR camera, sharp focus on face, natural skin texture, cinematic lighting.
 Ultra realistic, not AI-generated looking, photorealistic.
+IMPORTANT: DO NOT change facial features, DO NOT beautify, DO NOT alter the face.
 `.trim();
 
   return `${identitySection}\n\n${sceneSection}\n\n${qualitySection}`;
@@ -341,10 +364,13 @@ cartoon, anime, illustration, painting, drawing,
 face distortion, wrong face, different person, changed face,
 extra fingers, extra limbs, missing limbs,
 plastic skin, over-smoothed skin, wax skin,
-beautified face, idealized face, model face,
+beautified face, idealized face, model face, handsome face, pretty face,
+altered facial features, changed nose, changed eyes, changed mouth,
+different hairstyle, different hair color, different skin tone,
 low resolution, watermark, text, signature,
 bad anatomy, bad proportions, disconnected limbs,
-mutation, mutated, floating limbs, disfigured
+mutation, mutated, floating limbs, disfigured,
+younger appearance, older appearance, age change
 `.trim().replace(/\s+/g, ' ');
 }
 
