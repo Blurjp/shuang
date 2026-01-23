@@ -38,6 +38,13 @@ export interface DailyContent {
   delivered_at: Date | null;
   created_at: Date;
   feedback?: 'like' | 'neutral' | 'dislike' | null;
+  // Provider tracking (Phase 4)
+  story_provider?: 'claude' | 'openai' | null;
+  image_provider?: 'replicate' | 'openai' | null;
+  story_generation_time_ms?: number | null;
+  image_generation_time_ms?: number | null;
+  cost_estimate?: number | null;
+  scene_description?: string | null;
 }
 
 export interface Feedback {
@@ -216,12 +223,30 @@ export async function createDailyContent(data: {
   text: string;
   image_url: string;
   date: string;
+  story_provider?: 'claude' | 'openai' | null;
+  image_provider?: 'replicate' | 'openai' | null;
+  story_generation_time_ms?: number | null;
+  image_generation_time_ms?: number | null;
+  cost_estimate?: number | null;
+  scene_description?: string | null;
 }): Promise<DailyContent> {
   const id = generateId();
   queryRun(
-    `INSERT INTO daily_contents (id, user_id, text, image_url, date)
-     VALUES (?, ?, ?, ?, ?)`,
-    [id, data.user_id, data.text, data.image_url, data.date]
+    `INSERT INTO daily_contents (id, user_id, text, image_url, date, story_provider, image_provider, story_generation_time_ms, image_generation_time_ms, cost_estimate, scene_description)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      data.user_id,
+      data.text,
+      data.image_url,
+      data.date,
+      data.story_provider || null,
+      data.image_provider || null,
+      data.story_generation_time_ms || null,
+      data.image_generation_time_ms || null,
+      data.cost_estimate || null,
+      data.scene_description || null,
+    ]
   );
   const row = queryGet<DailyContent>('SELECT * FROM daily_contents WHERE id = ?', [id]);
   if (!row) throw new Error('Failed to create daily content');

@@ -6,6 +6,21 @@ import { imageGeneratorV2, type ImageGenerationResult } from './imageGeneratorV2
 import { generateStory as generateStoryV2 } from './storyGeneratorV2';
 import type { FeedbackInsights } from './storyGeneratorV2';
 
+// ============================================
+// Type Definitions for Provider Tracking
+// ============================================
+
+export interface StoryGenerationResult {
+  story: string;
+  provider: 'claude' | 'openai' | 'fallback';
+  generationTimeMs: number;
+  sceneDescription: string;
+}
+
+export interface ImageGenerationResultWithInfo extends ImageGenerationResult {
+  sceneDescription: string;
+}
+
 /**
  * Extract actual URL from photo_url field which can be:
  * 1. Direct URL (Cloudinary/R2)
@@ -101,8 +116,10 @@ export class ContentGenerator {
    * Generate sophisticated story text using Claude (primary) or OpenAI (fallback)
    * Uses storyGeneratorV2 with comprehensive 爽文 templates
    * Uses feedback-based personalization if available
+   *
+   * @returns StoryGenerationResult with story, provider, timing, and scene description
    */
-  async generateStory(user: User): Promise<string> {
+  async generateStoryWithMetadata(user: User): Promise<StoryGenerationResult> {
     // Reload environment variables to ensure we have the latest values
     this.reloadEnv();
 
@@ -142,12 +159,31 @@ export class ContentGenerator {
       console.log(`⏱️  Generation time: ${result.generationTimeMs}ms`);
       console.log(`🎭 Scene: ${result.sceneDescription}`);
 
-      return result.story;
+      return {
+        story: result.story,
+        provider: result.provider,
+        generationTimeMs: result.generationTimeMs,
+        sceneDescription: result.sceneDescription,
+      };
     } catch (error) {
       console.error('❌ storyGeneratorV2 failed, using fallback story:', error);
-      // Return a fallback story
-      return this.generateFallbackStory(user);
+      // Return a fallback story with metadata
+      const fallbackStory = this.generateFallbackStory(user);
+      return {
+        story: fallbackStory,
+        provider: 'fallback',
+        generationTimeMs: 0,
+        sceneDescription: 'Fallback story - no scene available',
+      };
     }
+  }
+
+  /**
+   * Generate story text only (backward compatibility)
+   */
+  async generateStory(user: User): Promise<string> {
+    const result = await this.generateStoryWithMetadata(user);
+    return result.story;
   }
 
   /**
@@ -480,10 +516,14 @@ export class ContentGenerator {
   /**
    * Generate image using Scene-based approach with Multi-Provider strategy
    * Priority: Replicate PhotoMaker (primary) > OpenAI gpt-image-1 (fallback) > DALL-E 3 (last resort)
+   *
+   * @returns ImageGenerationResultWithInfo with imageUrl, provider, timing, and cost
    */
-  async generateImage(storyText: string, user: User, userPhotoUrl?: string): Promise<string> {
+  async generateImageWithMetadata(storyText: string, user: User, userPhotoUrl?: string): Promise<ImageGenerationResultWithInfo> {
     // Reload environment variables
     this.reloadEnv();
+
+    const startTime = Date.now();
 
     console.log(`🎨 Generating image with Scene-based approach V2...`);
     console.log(`📸 User photo available: ${userPhotoUrl ? 'YES' : 'NO'}`);
@@ -525,12 +565,52 @@ export class ContentGenerator {
         console.log(`⏱️  Generation time: ${result.generationTimeMs}ms`);
         console.log(`💰 Estimated cost: $${result.costEstimate?.toFixed(4) || 'unknown'}`);
 
-        return result.imageUrl;
+        return {
+          ...result,
+          sceneDescription: scene.description,
+        };
       } catch (error: any) {
         console.error(`❌ imageGeneratorV2 failed:`, error?.message || error);
         // Fall through to DALL-E 3
       }
     }
+
+    // Final fallback to DALL-E 3
+    console.log(`🎨 Using DALL-E 3 as final fallback...`);
+    try {
+      const userGender = (user.gender as 'male' | 'female') || 'male';
+      const imageUrl = await this.generateWithDalle3(scene, userGender);
+      const duration = Date.now() - startTime;
+      console.log(`✅ Image generated with DALL-E 3`);
+
+      return {
+        imageUrl,
+        provider: 'openai',
+        generationTimeMs: duration,
+        costEstimate: 0.04, // DALL-E 3 512x512 ~ $0.04
+        sceneDescription: scene.description,
+      };
+    } catch (error) {
+      console.error('❌ DALL-E 3 failed:', error);
+      console.log(`📦 Using placeholder image`);
+      const placeholderUrl = this.getPlaceholderImage(user);
+      return {
+        imageUrl: placeholderUrl,
+        provider: 'openai',
+        generationTimeMs: Date.now() - startTime,
+        costEstimate: 0,
+        sceneDescription: scene.description,
+      };
+    }
+  }
+
+  /**
+   * Generate image URL only (backward compatibility)
+   */
+  async generateImage(storyText: string, user: User, userPhotoUrl?: string): Promise<string> {
+    const result = await this.generateImageWithMetadata(storyText, user, userPhotoUrl);
+    return result.imageUrl;
+  }
 
     // Final fallback to DALL-E 3
     console.log(`🎨 Using DALL-E 3 as final fallback...`);

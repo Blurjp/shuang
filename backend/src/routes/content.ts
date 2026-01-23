@@ -187,17 +187,32 @@ router.post('/generate', async (req: AuthRequest, res: Response) => {
 
     // Generate content
     console.log(`Generating content for user ${userId}...`);
-    const text = await contentGenerator.generateStory(user);
-    const imageUrl = await contentGenerator.generateImage(text, user, userPhotoUrl);
 
-    // Store or update content
+    // Generate story with metadata (provider info)
+    const storyResult = await contentGenerator.generateStoryWithMetadata(user);
+    const text = storyResult.story;
+
+    // Generate image with metadata (provider info)
+    const imageResult = await contentGenerator.generateImageWithMetadata(text, user, userPhotoUrl);
+    const imageUrl = imageResult.imageUrl;
+
+    // Calculate total cost
+    const totalCost = (imageResult.costEstimate || 0) + 0.001; // Story generation ~ $0.001
+
+    // Store or update content with provider tracking
     let content;
     if (existingContent) {
       // Premium user regenerating content - update existing
       console.log(`Updating existing content ${existingContent.id} for user ${userId}`);
       content = await updateDailyContent(existingContent.id, {
         text,
-        image_url: imageUrl
+        image_url: imageUrl,
+        story_provider: storyResult.provider,
+        image_provider: imageResult.provider,
+        story_generation_time_ms: storyResult.generationTimeMs,
+        image_generation_time_ms: imageResult.generationTimeMs,
+        cost_estimate: totalCost,
+        scene_description: storyResult.sceneDescription,
       });
       if (!content) {
         throw new Error('Failed to update content');
@@ -208,7 +223,13 @@ router.post('/generate', async (req: AuthRequest, res: Response) => {
         user_id: userId,
         text,
         image_url: imageUrl,
-        date: today
+        date: today,
+        story_provider: storyResult.provider,
+        image_provider: imageResult.provider,
+        story_generation_time_ms: storyResult.generationTimeMs,
+        image_generation_time_ms: imageResult.generationTimeMs,
+        cost_estimate: totalCost,
+        scene_description: storyResult.sceneDescription,
       });
 
       // Track generation (only for first generation of the day)
@@ -217,6 +238,8 @@ router.post('/generate', async (req: AuthRequest, res: Response) => {
         generated_date: today
       });
     }
+
+    console.log(`Provider tracking - Story: ${storyResult.provider}, Image: ${imageResult.provider}, Cost: $${totalCost.toFixed(4)}`);
 
     console.log(`Successfully generated content ${content.id} for user ${userId}`);
 
