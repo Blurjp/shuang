@@ -34,6 +34,9 @@ class OpenAIImageEditService {
     scene: Scene,
     userGender: 'male' | 'female'
   ): Promise<string> {
+    // Reload API key at call time to support dotenv.config() in tests
+    this.apiKey = process.env.IMAGE_API_KEY || '';
+
     if (!this.apiKey) {
       throw new Error('IMAGE_API_KEY not configured');
     }
@@ -75,7 +78,7 @@ class OpenAIImageEditService {
       formData.append('prompt', prompt);
       formData.append('model', 'gpt-image-1'); // Use gpt-image-1 for identity preservation
       formData.append('n', '1');
-      formData.append('size', '512x512'); // Reduced from 1024x1024 for cost savings (mobile display)
+      formData.append('size', '1024x1024'); // gpt-image-1 requires 1024x1024 or larger
 
       console.log('🔄 Calling OpenAI Image Edit API...');
 

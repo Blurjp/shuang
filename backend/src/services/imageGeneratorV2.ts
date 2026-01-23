@@ -49,7 +49,8 @@ interface ProviderMetrics {
 const CONFIG = {
   // Replicate PhotoMaker configuration
   replicate: {
-    model: 'tencentarc/photomaker:ddfc2b08d209f9fa8c1ece59bdb7b9da21d3f0f41ab25d8b8db0456a7e2a1b7b',
+    // Use tencentarc/photomaker model (latest version)
+    model: 'tencentarc/photomaker',
     numSteps: 30,
     styleStrengthRatio: 30,    // 20-40 keeps more original appearance
     guidanceScale: 7.5,
@@ -218,6 +219,7 @@ async function generateWithReplicate(
   console.log('🔄 Calling Replicate PhotoMaker API...');
 
   // Call Replicate with timeout
+  // PhotoMaker uses specific parameter names
   const output = await withTimeout(
     replicate.run(CONFIG.replicate.model as any, {
       input: {
