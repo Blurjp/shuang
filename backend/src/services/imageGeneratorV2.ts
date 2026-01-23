@@ -49,12 +49,12 @@ interface ProviderMetrics {
 const CONFIG = {
   // Replicate PhotoMaker configuration
   replicate: {
-    // Use tencentarc/photomaker model (latest version)
-    model: 'tencentarc/photomaker',
-    numSteps: 30,
-    styleStrengthRatio: 30,    // 20-40 keeps more original appearance
+    // Use specific version hash for tencentarc/photomaker
+    model: 'tencentarc/photomaker:ddfc2b08d209f9fa8c1eca692712918bd449f695dabb4a958da31802a9570fe4',
+    numSteps: 50,              // PhotoMaker recommends 50 steps
+    styleStrengthRatio: 20,    // 20-40 keeps more original appearance
     guidanceScale: 7.5,
-    timeout: 180000,           // 3 minutes timeout
+    timeout: 300000,           // 5 minutes timeout (PhotoMaker can be slower)
   },
 
   // OpenAI fallback configuration
@@ -235,17 +235,50 @@ async function generateWithReplicate(
     CONFIG.replicate.timeout
   ) as any;
 
-  // PhotoMaker returns an array of image URLs or a single URL
-  let imageUrl: string;
+  // Debug: Log output structure
+  console.log('📦 Replicate output type:', typeof output);
+  console.log('📦 Is array:', Array.isArray(output));
   if (Array.isArray(output)) {
-    imageUrl = output[0];
+    console.log('📦 Array length:', output.length);
+    console.log('📦 First item type:', typeof output[0]);
+    const item = output[0];
+    console.log('📦 Has .url:', 'url' in item);
+    console.log('📦 .url type:', typeof item.url);
+    console.log('📦 .url value:', item.url);
+  }
+
+  // PhotoMaker returns an array of objects with .url (function) and .read() (method)
+  // Format: [{url: () => URL | string, read(): () toBuffer()}]
+  let imageUrl: string;
+  if (Array.isArray(output) && output.length > 0) {
+    // First item in array
+    const item = output[0];
+    // Check if it's an object with url property
+    if (item && typeof item === 'object' && 'url' in item) {
+      // item.url might be a function or a string
+      const urlProperty = (item as any).url;
+      if (typeof urlProperty === 'function') {
+        // Call the function to get the URL
+        const urlResult = urlProperty();
+        // Convert URL object or string to string
+        imageUrl = urlResult.toString();
+      } else if (typeof urlProperty === 'string') {
+        imageUrl = urlProperty;
+      } else {
+        throw new Error(`Unexpected .url type: ${typeof urlProperty}`);
+      }
+    } else if (typeof item === 'string') {
+      imageUrl = item;
+    } else {
+      throw new Error(`Unexpected output format: ${JSON.stringify(output).substring(0, 200)}`);
+    }
   } else if (typeof output === 'string') {
     imageUrl = output;
   } else if (output?.output) {
     // Some Replicate models wrap output in an object
     imageUrl = Array.isArray(output.output) ? output.output[0] : output.output;
   } else {
-    throw new Error(`Unexpected output format from Replicate: ${JSON.stringify(output)}`);
+    throw new Error(`Unexpected output format from Replicate: ${JSON.stringify(output).substring(0, 200)}`);
   }
 
   console.log(`✅ PhotoMaker generated image: ${imageUrl.substring(0, 60)}...`);
@@ -270,13 +303,14 @@ async function generateWithReplicate(
 
 /**
  * Build prompt optimized for PhotoMaker model
- * PhotoMaker works best with specific prompt structure
+ * PhotoMaker requires "img" trigger word in the prompt
  */
 function buildPhotoMakerPrompt(scene: Scene, gender: 'male' | 'female'): string {
   const genderTerm = gender === 'male' ? 'man' : 'woman';
 
-  // PhotoMaker-specific prompt structure
-  const identitySection = `A photo of a ${genderTerm} with the exact same face as the reference image.`;
+  // PhotoMaker-specific prompt structure with "img" trigger word
+  // The "img" keyword tells PhotoMaker where to place the face
+  const identitySection = `A photo of a ${genderTerm} img with the exact same face as the reference image.`;
 
   const sceneSection = `
 ${scene.description}
