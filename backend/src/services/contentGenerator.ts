@@ -3,6 +3,8 @@ import { analyzeStory, Scene } from './sceneGenerator';
 import { openaiImageEditService } from './openaiImageEdit';
 import { getPersonalizedSuggestions } from './feedbackAnalyzer';
 import { imageGeneratorV2, type ImageGenerationResult } from './imageGeneratorV2';
+import { generateStory as generateStoryV2 } from './storyGeneratorV2';
+import type { FeedbackInsights } from './storyGeneratorV2';
 
 /**
  * Extract actual URL from photo_url field which can be:
@@ -96,7 +98,8 @@ export class ContentGenerator {
   }
 
   /**
-   * Generate sophisticated story text using LLM
+   * Generate sophisticated story text using Claude (primary) or OpenAI (fallback)
+   * Uses storyGeneratorV2 with comprehensive 爽文 templates
    * Uses feedback-based personalization if available
    */
   async generateStory(user: User): Promise<string> {
@@ -104,7 +107,7 @@ export class ContentGenerator {
     this.reloadEnv();
 
     // Try to get personalized suggestions based on user's feedback history
-    let effectiveUser = user;
+    let feedbackInsights: FeedbackInsights | undefined;
     try {
       const suggestions = await getPersonalizedSuggestions(user.id);
       if (suggestions.genre && suggestions.confidence >= 0.6) {
@@ -113,67 +116,35 @@ export class ContentGenerator {
         if (suggestions.emotion) {
           console.log(`   Emotion: ${user.emotion_preference} → ${suggestions.emotion}`);
         }
-        // Create a modified user object with personalized preferences
-        effectiveUser = {
-          ...user,
-          genre_preference: suggestions.genre,
-          emotion_preference: suggestions.emotion || user.emotion_preference
+        // Build feedback insights for storyGeneratorV2
+        feedbackInsights = {
+          likePercentage: suggestions.confidence,
+          preferredElements: suggestions.genre ? [suggestions.genre] : [],
+          avoidElements: []
         };
       }
     } catch (error) {
       console.warn('Could not get personalized suggestions, using default preferences');
     }
 
-    const prompt = this.buildPrompt(effectiveUser);
-
-    // Debug: Log API key status
-    const hasKey = this.llmApiKey && this.llmApiKey.length > 10;
-    console.log(`🔑 API Key configured: ${hasKey} (length: ${this.llmApiKey?.length || 0})`);
-
     try {
-      const response = await fetch(this.llmApiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.llmApiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini', // Use better model for sophisticated content
-          messages: [
-            {
-              role: 'system',
-              content: this.getSystemPrompt()
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          max_tokens: 800, // Much longer stories
-          temperature: 0.85 // Higher creativity
-        })
+      console.log(`📖 Generating story with storyGeneratorV2 (Claude primary, OpenAI fallback)...`);
+
+      const result = await generateStoryV2({
+        gender: (user.gender as 'male' | 'female') || 'male',
+        genre: (user.genre_preference as any) || 'modern',
+        emotion: (user.emotion_preference as any) || 'satisfaction',
+        feedbackInsights
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`LLM API error: ${response.status} ${response.statusText}`);
-        console.error(`Response body: ${errorText}`);
+      console.log(`✅ Story generated successfully!`);
+      console.log(`📊 Provider: ${result.provider}`);
+      console.log(`⏱️  Generation time: ${result.generationTimeMs}ms`);
+      console.log(`🎭 Scene: ${result.sceneDescription}`);
 
-        // Fallback to gpt-3.5-turbo if gpt-4o-mini fails
-        console.log(`⚠️  Falling back to gpt-3.5-turbo...`);
-        return await this.generateWithGPT35(effectiveUser);
-      }
-
-      const data = await response.json() as any;
-      const text = data.choices[0].message.content.trim();
-
-      // Clean up any markdown formatting
-      const cleanText = text.replace(/^["']|["']$/g, '').replace(/\\n/g, '\n');
-
-      console.log(`✅ Story generated successfully: ${cleanText.substring(0, 80)}...`);
-      return cleanText;
+      return result.story;
     } catch (error) {
-      console.error('Failed to generate story:', error);
+      console.error('❌ storyGeneratorV2 failed, using fallback story:', error);
       // Return a fallback story
       return this.generateFallbackStory(user);
     }
