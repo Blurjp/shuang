@@ -16,6 +16,7 @@ import contentRoutes from './routes/content';
 import feedbackRoutes from './routes/feedback';
 import photoRoutes from './routes/photos';
 import subscriptionRoutes from './routes/subscription';
+import storyArcRoutes from './routes/storyArcs';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -93,6 +94,7 @@ app.use('/api/photos', photoRoutes);
 app.use('/api/content', contentRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/arcs', storyArcRoutes);
 
 // 404 handler
 app.use((req, res) => {

@@ -612,20 +612,6 @@ export class ContentGenerator {
     return result.imageUrl;
   }
 
-    // Final fallback to DALL-E 3
-    console.log(`🎨 Using DALL-E 3 as final fallback...`);
-    try {
-      const userGender = (user.gender as 'male' | 'female') || 'male';
-      const imageUrl = await this.generateWithDalle3(scene, userGender);
-      console.log(`✅ Image generated with DALL-E 3`);
-      return imageUrl;
-    } catch (error) {
-      console.error('❌ DALL-E 3 failed:', error);
-      console.log(`📦 Using placeholder image`);
-      return this.getPlaceholderImage(user);
-    }
-  }
-
   /**
    * Generate image using DALL-E 3 with detailed scene prompt (fallback)
    */

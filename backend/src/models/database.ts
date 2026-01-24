@@ -69,6 +69,46 @@ export interface ContentGeneration {
   created_at: Date;
 }
 
+// Story Arc Types
+export type StoryArcStatus = 'active' | 'completed' | 'cancelled';
+export type StoryProvider = 'claude' | 'openai' | null;
+export type ImageProvider = 'replicate' | 'openai' | null;
+
+export interface StoryArc {
+  id: string;
+  user_id: string;
+  story_template_id: string;
+  title: string;
+  summary: string | null;
+  genre: string;
+  emotion: string;
+  status: StoryArcStatus;
+  current_day: number;
+  total_days: number;
+  started_at: Date;
+  completed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface StoryEpisode {
+  id: string;
+  story_arc_id: string;
+  episode_number: number;
+  title: string | null;
+  text: string;
+  image_url: string;
+  scene_description: string | null;
+  delivered_at: Date | null;
+  feedback: 'like' | 'neutral' | 'dislike' | null;
+  story_provider: StoryProvider;
+  image_provider: ImageProvider;
+  story_generation_time_ms: number | null;
+  image_generation_time_ms: number | null;
+  cost_estimate: number | null;
+  created_at: Date;
+}
+
 // Database connection check
 export async function checkDatabaseConnection(): Promise<boolean> {
   try {
@@ -398,6 +438,178 @@ export async function createContentGeneration(data: {
   const row = queryGet<ContentGeneration>('SELECT * FROM content_generations WHERE id = ?', [id]);
   if (!row) throw new Error('Failed to create content generation');
   return row;
+}
+
+// Story Arc queries
+export async function getActiveStoryArc(userId: string): Promise<StoryArc | null> {
+  const row = queryGet<StoryArc>(
+    'SELECT * FROM story_arcs WHERE user_id = ? AND status = ?',
+    [userId, 'active']
+  );
+  return row || null;
+}
+
+export async function getStoryArcById(arcId: string): Promise<StoryArc | null> {
+  const row = queryGet<StoryArc>(
+    'SELECT * FROM story_arcs WHERE id = ?',
+    [arcId]
+  );
+  return row || null;
+}
+
+export async function createStoryArc(data: {
+  user_id: string;
+  story_template_id: string;
+  title: string;
+  summary?: string;
+  genre: string;
+  emotion: string;
+  total_days?: number;
+}): Promise<StoryArc> {
+  const id = generateId();
+  queryRun(
+    `INSERT INTO story_arcs (id, user_id, story_template_id, title, summary, genre, emotion, total_days)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      data.user_id,
+      data.story_template_id,
+      data.title,
+      data.summary || null,
+      data.genre,
+      data.emotion,
+      data.total_days || 30,
+    ]
+  );
+  const row = queryGet<StoryArc>('SELECT * FROM story_arcs WHERE id = ?', [id]);
+  if (!row) throw new Error('Failed to create story arc');
+  return row;
+}
+
+export async function updateStoryArc(arcId: string, data: Partial<StoryArc>): Promise<StoryArc | null> {
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined && key !== 'id' && key !== 'created_at') {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  }
+
+  if (fields.length === 0) return getStoryArcById(arcId);
+
+  values.push(arcId);
+  queryRun(
+    `UPDATE story_arcs SET ${fields.join(', ')} WHERE id = ?`,
+    values
+  );
+  return getStoryArcById(arcId);
+}
+
+export async function completeStoryArc(arcId: string): Promise<StoryArc | null> {
+  return updateStoryArc(arcId, {
+    status: 'completed',
+    completed_at: new Date() as any,
+  });
+}
+
+// Story Episode queries
+export async function getEpisodeByNumber(storyArcId: string, episodeNumber: number): Promise<StoryEpisode | null> {
+  const row = queryGet<StoryEpisode>(
+    'SELECT * FROM story_episodes WHERE story_arc_id = ? AND episode_number = ?',
+    [storyArcId, episodeNumber]
+  );
+  return row || null;
+}
+
+export async function getEpisodesByArc(storyArcId: string): Promise<StoryEpisode[]> {
+  const rows = queryAll<StoryEpisode>(
+    'SELECT * FROM story_episodes WHERE story_arc_id = ? ORDER BY episode_number ASC',
+    [storyArcId]
+  );
+  return rows;
+}
+
+export async function getLatestEpisode(storyArcId: string): Promise<StoryEpisode | null> {
+  const row = queryGet<StoryEpisode>(
+    'SELECT * FROM story_episodes WHERE story_arc_id = ? ORDER BY episode_number DESC LIMIT 1',
+    [storyArcId]
+  );
+  return row || null;
+}
+
+export async function createStoryEpisode(data: {
+  story_arc_id: string;
+  episode_number: number;
+  title?: string;
+  text: string;
+  image_url: string;
+  scene_description?: string;
+  story_provider?: StoryProvider;
+  image_provider?: ImageProvider;
+  story_generation_time_ms?: number;
+  image_generation_time_ms?: number;
+  cost_estimate?: number;
+}): Promise<StoryEpisode> {
+  const id = generateId();
+  queryRun(
+    `INSERT INTO story_episodes (
+      id, story_arc_id, episode_number, title, text, image_url, scene_description,
+      story_provider, image_provider, story_generation_time_ms, image_generation_time_ms, cost_estimate
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      data.story_arc_id,
+      data.episode_number,
+      data.title || null,
+      data.text,
+      data.image_url,
+      data.scene_description || null,
+      data.story_provider || null,
+      data.image_provider || null,
+      data.story_generation_time_ms || null,
+      data.image_generation_time_ms || null,
+      data.cost_estimate || null,
+    ]
+  );
+  const row = queryGet<StoryEpisode>('SELECT * FROM story_episodes WHERE id = ?', [id]);
+  if (!row) throw new Error('Failed to create story episode');
+  return row;
+}
+
+export async function updateEpisodeDelivered(episodeId: string): Promise<StoryEpisode | null> {
+  const row = queryGet<StoryEpisode>(
+    'UPDATE story_episodes SET delivered_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING *',
+    [episodeId]
+  );
+
+  // SQLite doesn't support RETURNING, so we need a separate query
+  queryRun('UPDATE story_episodes SET delivered_at = CURRENT_TIMESTAMP WHERE id = ?', [episodeId]);
+  return queryGet<StoryEpisode>('SELECT * FROM story_episodes WHERE id = ?', [episodeId]);
+}
+
+export async function updateEpisodeFeedback(episodeId: string, feedback: 'like' | 'neutral' | 'dislike'): Promise<StoryEpisode | null> {
+  queryRun('UPDATE story_episodes SET feedback = ? WHERE id = ?', [feedback, episodeId]);
+  return queryGet<StoryEpisode>('SELECT * FROM story_episodes WHERE id = ?', [episodeId]);
+}
+
+export async function getEpisodeById(episodeId: string): Promise<StoryEpisode | null> {
+  const row = queryGet<StoryEpisode>(
+    'SELECT * FROM story_episodes WHERE id = ?',
+    [episodeId]
+  );
+  return row || null;
+}
+
+// Get today's episode for a user's active story arc
+export async function getTodayEpisode(userId: string): Promise<{ arc: StoryArc; episode: StoryEpisode | null } | null> {
+  const arc = await getActiveStoryArc(userId);
+  if (!arc) return null;
+
+  const episode = await getEpisodeByNumber(arc.id, arc.current_day);
+  return { arc, episode };
 }
 
 // Initialize database tables
