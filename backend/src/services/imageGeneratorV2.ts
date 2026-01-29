@@ -334,8 +334,12 @@ function buildPhotoMakerPrompt(scene: Scene, gender: 'male' | 'female'): string 
   // Format: "a img [noun]" triggers PhotoMaker to use the reference face
   const identitySection = `A photo of a img ${genderTerm} with IDENTICAL face to the reference photo. MUST preserve: exact same eye shape, eye color, eyebrows, nose, lips, face shape, hairstyle, skin tone.`;
 
+  // Sanitize scene description to remove references to multiple people
+  // This prevents PhotoMaker from generating multiple faces
+  const sanitizedDescription = sanitizeSceneDescription(scene.description);
+
   const sceneSection = `
-${scene.description}
+${sanitizedDescription}
 
 Setting: ${scene.environment}
 Action: ${scene.camera.action || 'standing confidently'}
@@ -355,6 +359,61 @@ IMPORTANT: DO NOT change facial features, DO NOT beautify, DO NOT alter the face
 }
 
 /**
+ * Sanitize scene description to prevent PhotoMaker from generating multiple faces
+ *
+ * PhotoMaker tends to generate multiple people when the scene description mentions:
+ * - Couples, pairs, two people, together, etc.
+ * - Romance between characters
+ * - Multiple names or pronouns (he/she, him/her, they)
+ *
+ * This function replaces such references with single-person descriptions.
+ */
+function sanitizeSceneDescription(description: string): string {
+  let sanitized = description;
+
+  // Replace references to couples/pairs with single person
+  const couplePatterns = [
+    /\b(couple|pair|duo|twosome|two people|both of them|they both)\b/gi,
+    /\b(together|side by side|facing each other|gazing into each other|embracing|holding hands)\b/gi,
+    /\b(his and her|their|them|they)\b/gi,
+    /\b(he and she|she and he|him and her)\b/gi,
+  ];
+
+  for (const pattern of couplePatterns) {
+    sanitized = sanitized.replace(pattern, 'alone');
+  }
+
+  // Replace multiple name references with single person
+  const namePattern = /(\b[A-Z][a-z]+\b)\s+and\s+(\b[A-Z][a-z]+\b)/g;
+  sanitized = sanitized.replace(namePattern, '$1');
+
+  // Replace "two" with "one" in contexts that might suggest multiple people
+  sanitized = sanitized.replace(/\btwo\b/gi, 'one');
+
+  // Remove specific romantic phrases that imply two people
+  const romanticPhrases = [
+    /arms around each other/gi,
+    /lips met/gi,
+    /kissed/gi,
+    /whispered in his ear/gi,
+    /whispered in her ear/gi,
+    /pulled him close/gi,
+    /pulled her close/gi,
+    /drew him in/gi,
+    /drew her in/gi,
+  ];
+
+  for (const phrase of romanticPhrases) {
+    sanitized = sanitized.replace(phrase, 'stood with emotion');
+  }
+
+  // Clean up any double spaces created by replacements
+  sanitized = sanitized.replace(/\s+/g, ' ').trim();
+
+  return sanitized;
+}
+
+/**
  * Build negative prompt to avoid common issues
  */
 function buildNegativePrompt(): string {
@@ -370,7 +429,10 @@ different hairstyle, different hair color, different skin tone,
 low resolution, watermark, text, signature,
 bad anatomy, bad proportions, disconnected limbs,
 mutation, mutated, floating limbs, disfigured,
-younger appearance, older appearance, age change
+younger appearance, older appearance, age change,
+multiple people, more than one person, two people, couple, pair, group, crowd,
+extra faces, additional faces, multiple faces, two faces, group of people,
+romantic couple, lovers, pair of people, duo, twosome
 `.trim().replace(/\s+/g, ' ');
 }
 
