@@ -14,8 +14,28 @@ router.post('/onboarding', async (req: AuthRequest, res: Response) => {
 
   // Validate inputs
   const validGenders = ['male', 'female'];
-  const validGenres = ['modern', 'ancient', 'fantasy', 'urban', 'business'];
-  const validEmotions = ['favored', 'revenge', 'satisfaction', 'growth'];
+
+  // Combined valid genres (Western + Chinese 爽文)
+  const validGenres = [
+    // Western Genres
+    'Romance', 'Dark Romance', 'Fantasy Romance', 'New Adult',
+    'Taboo Romance', 'Romantic Comedy', 'Celebrity Romance', 'Forbidden Romance',
+    'Business', 'Personal Growth', 'Lifestyle', 'Career', 'Travel',
+    // Chinese 爽文 Genres (Legacy)
+    'modern', 'ancient', 'fantasy', 'urban', 'business'
+  ];
+
+  // Combined valid emotions (Western + Chinese 爽文)
+  const validEmotions = [
+    // Western Emotions
+    'Revenge', 'Dark Passion', 'Second Chance', 'Enemies to Lovers',
+    'Dangerous Love', 'Forbidden Love', 'Slow Burn', 'Wish Fulfillment',
+    'Forbidden Desire', 'Academic Romance', 'Loyalty vs Love', 'Arranged Marriage',
+    'Boss-Employee', 'Captor-Captive', 'Body Swap', 'Reunion',
+    'Ambition', 'Empowerment', 'Adventure', 'Aspiration', 'Determination',
+    // Chinese 爽文 Emotions (Legacy)
+    'favored', 'revenge', 'satisfaction', 'growth'
+  ];
 
   if (!validGenders.includes(gender)) {
     return res.status(400).json({ error: 'Invalid gender' });
@@ -71,8 +91,28 @@ router.put('/preferences', async (req: AuthRequest, res: Response) => {
 
   // Validate inputs
   const validGenders = ['male', 'female'];
-  const validGenres = ['modern', 'ancient', 'fantasy', 'urban', 'business'];
-  const validEmotions = ['favored', 'revenge', 'satisfaction', 'growth'];
+
+  // Combined valid genres (Western + Chinese 爽文)
+  const validGenres = [
+    // Western Genres
+    'Romance', 'Dark Romance', 'Fantasy Romance', 'New Adult',
+    'Taboo Romance', 'Romantic Comedy', 'Celebrity Romance', 'Forbidden Romance',
+    'Business', 'Personal Growth', 'Lifestyle', 'Career', 'Travel',
+    // Chinese 爽文 Genres (Legacy)
+    'modern', 'ancient', 'fantasy', 'urban', 'business'
+  ];
+
+  // Combined valid emotions (Western + Chinese 爽文)
+  const validEmotions = [
+    // Western Emotions
+    'Revenge', 'Dark Passion', 'Second Chance', 'Enemies to Lovers',
+    'Dangerous Love', 'Forbidden Love', 'Slow Burn', 'Wish Fulfillment',
+    'Forbidden Desire', 'Academic Romance', 'Loyalty vs Love', 'Arranged Marriage',
+    'Boss-Employee', 'Captor-Captive', 'Body Swap', 'Reunion',
+    'Ambition', 'Empowerment', 'Adventure', 'Aspiration', 'Determination',
+    // Chinese 爽文 Emotions (Legacy)
+    'favored', 'revenge', 'satisfaction', 'growth'
+  ];
 
   if (gender && !validGenders.includes(gender)) {
     return res.status(400).json({ error: 'Invalid gender' });
