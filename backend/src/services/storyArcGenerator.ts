@@ -138,8 +138,8 @@ class StoryArcGenerator {
     previousEpisodes: StoryEpisode[],
     params: EpisodeGenerationParams
   ): string {
-    const protagonistName = params.userName || this.getDefaultProtagonistName(template);
-    const loveInterestName = params.loveInterestName || this.getDefaultLoveInterestName(template);
+    const protagonistName = params.userName || this.getDefaultProtagonistName(template, params.user.gender);
+    const loveInterestName = params.loveInterestName || this.getDefaultLoveInterestName(template, params.user.gender);
 
     let context = `You are writing Episode ${params.dayNumber} of a 30-day romance story arc.
 
@@ -393,13 +393,13 @@ SCENE_DESCRIPTION: [1-2 sentences describing the visual scene for image generati
   /**
    * Get default protagonist name from template
    */
-  private getDefaultProtagonistName(template: StoryTemplate): string {
-    // Extract name from summary or use defaults
+  private getDefaultProtagonistName(template: StoryTemplate, userGender: string): string {
+    // Extract name from summary or use gender-specific defaults
     const nameMatch = template.summary.match(/([A-Z][a-z]+) (?:was|is)/);
     if (nameMatch) return nameMatch[1];
 
-    // Genre-based defaults
-    const defaults: Record<string, string> = {
+    // Gender-specific defaults
+    const femaleDefaults: Record<string, string> = {
       'Romance': 'Emma',
       'Dark Romance': 'Bella',
       'Fantasy Romance': 'Celeste',
@@ -410,23 +410,7 @@ SCENE_DESCRIPTION: [1-2 sentences describing the visual scene for image generati
       'Forbidden Romance': 'Olivia',
     };
 
-    return defaults[template.genre] || 'Emma';
-  }
-
-  /**
-   * Get default love interest name from template
-   */
-  private getDefaultLoveInterestName(template: StoryTemplate): string {
-    // Extract male name from summary or use defaults
-    const maleNames = template.summary.match(/\b([A-Z][a-z]+)\b/g) || [];
-    const maleName = maleNames.find(name =>
-      !['Emma', 'Bella', 'Celeste', 'Ella', 'Haley', 'Natalie', 'Zoe', 'Olivia', 'Sophia', 'Victoria', 'Mia', 'Isabella', 'Chloe', 'Hannah', 'Angela', 'Tessa', 'Lily', 'Sofia'].includes(name)
-    );
-
-    if (maleName) return maleName;
-
-    // Genre-based defaults
-    const defaults: Record<string, string> = {
+    const maleDefaults: Record<string, string> = {
       'Romance': 'Liam',
       'Dark Romance': 'Nico',
       'Fantasy Romance': 'Kieran',
@@ -437,7 +421,52 @@ SCENE_DESCRIPTION: [1-2 sentences describing the visual scene for image generati
       'Forbidden Romance': 'Alexander',
     };
 
-    return defaults[template.genre] || 'Liam';
+    // Use male or female defaults based on user gender
+    if (userGender === 'male') {
+      return maleDefaults[template.genre] || 'Liam';
+    }
+    return femaleDefaults[template.genre] || 'Emma';
+  }
+
+  /**
+   * Get default love interest name from template
+   */
+  private getDefaultLoveInterestName(template: StoryTemplate, userGender: string): string {
+    // Extract name from summary or use gender-specific defaults
+    const names = template.summary.match(/\b([A-Z][a-z]+)\b/g) || [];
+    const excludedNames = ['Emma', 'Bella', 'Celeste', 'Ella', 'Haley', 'Natalie', 'Zoe', 'Olivia', 'Sophia', 'Victoria', 'Mia', 'Isabella', 'Chloe', 'Hannah', 'Angela', 'Tessa', 'Lily', 'Sofia',
+      'Liam', 'Nico', 'Kieran', 'Logan', 'Cole', 'Adam', 'Ethan', 'Alexander', 'Jacob', 'Ryan', 'Tyler', 'Brandon', 'Kevin'];
+    const foundName = names.find(name => !excludedNames.includes(name));
+    if (foundName) return foundName;
+
+    // Gender-specific defaults for love interest (opposite of protagonist)
+    const femaleLoveInterestDefaults: Record<string, string> = {
+      'Romance': 'Emma',
+      'Dark Romance': 'Bella',
+      'Fantasy Romance': 'Celeste',
+      'New Adult': 'Ella',
+      'Taboo Romance': 'Haley',
+      'Romantic Comedy': 'Natalie',
+      'Celebrity Romance': 'Zoe',
+      'Forbidden Romance': 'Olivia',
+    };
+
+    const maleLoveInterestDefaults: Record<string, string> = {
+      'Romance': 'Liam',
+      'Dark Romance': 'Nico',
+      'Fantasy Romance': 'Kieran',
+      'New Adult': 'Logan',
+      'Taboo Romance': 'Cole',
+      'Romantic Comedy': 'Adam',
+      'Celebrity Romance': 'Ethan',
+      'Forbidden Romance': 'Alexander',
+    };
+
+    // Love interest should be opposite gender of user
+    if (userGender === 'male') {
+      return femaleLoveInterestDefaults[template.genre] || 'Emma';
+    }
+    return maleLoveInterestDefaults[template.genre] || 'Liam';
   }
 }
 
