@@ -138,8 +138,9 @@ class StoryArcGenerator {
     previousEpisodes: StoryEpisode[],
     params: EpisodeGenerationParams
   ): string {
-    const protagonistName = params.userName || this.getDefaultProtagonistName(template, params.user.gender);
-    const loveInterestName = params.loveInterestName || this.getDefaultLoveInterestName(template, params.user.gender);
+    const userGender = params.user.gender || 'male';
+    const protagonistName = params.userName || this.getDefaultProtagonistName(template, userGender);
+    const loveInterestName = params.loveInterestName || this.getDefaultLoveInterestName(template, userGender);
 
     let context = `You are writing Episode ${params.dayNumber} of a 30-day romance story arc.
 
@@ -293,6 +294,16 @@ SCENE_DESCRIPTION: [1-2 sentences describing the visual scene for image generati
       };
     }
 
+    // Determine mood and lighting based on genre (not always romantic)
+    const isRomance = template.genre.toLowerCase().includes('romance');
+    const lightingQuality = isRomance
+      ? 'natural, flattering light that enhances romantic mood'
+      : template.genre.toLowerCase().includes('business') || template.genre.toLowerCase().includes('career')
+      ? 'professional office lighting, crisp and clear'
+      : template.genre === 'Travel'
+      ? 'natural sunlight, golden hour warmth'
+      : 'natural, flattering light';
+
     // Create a Scene object from the description
     const scene: Scene = {
       description: sceneDescription,
@@ -303,21 +314,22 @@ SCENE_DESCRIPTION: [1-2 sentences describing the visual scene for image generati
       },
       lighting: {
         type: 'soft-diffused',
-        quality: 'natural, flattering light that enhances romantic mood',
+        quality: lightingQuality,
       },
       emotion: 'confident',
       environment: template.visualStyle.settingImagery.split(',')[0] || 'Modern urban setting',
-      atmosphere: template.visualStyle.moodDetails.split('.')[0] || 'Romantic and intimate',
+      atmosphere: template.visualStyle.moodDetails.split('.')[0] || 'Professional and confident',
       isSafe: true,
     };
 
     const userGender = (user.gender as 'male' | 'female') || 'male';
 
-    // Generate image using the scene
+    // Generate image using the scene (pass genre for conditional sanitization)
     const result = await generatePersonalizedImage({
       userPhotoUrl,
       scene,
       gender: userGender,
+      genre: template.genre,
     });
 
     return {

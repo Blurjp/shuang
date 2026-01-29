@@ -25,6 +25,7 @@ export interface ImageGenerationParams {
   userPhotoUrl: string;       // User's reference photo URL
   scene: Scene;               // Scene configuration
   gender: 'male' | 'female';  // User gender
+  genre?: string;             // Story genre (to determine if sanitization is needed)
 }
 
 export interface ImageGenerationResult {
@@ -226,8 +227,8 @@ async function generateWithReplicate(
 
   const replicate = new Replicate({ auth: apiKey });
 
-  // Build prompt for PhotoMaker
-  const prompt = buildPhotoMakerPrompt(params.scene, params.gender);
+  // Build prompt for PhotoMaker (pass genre for conditional sanitization)
+  const prompt = buildPhotoMakerPrompt(params.scene, params.gender, params.genre);
   const negativePrompt = buildNegativePrompt();
 
   console.log(`📝 PhotoMaker prompt: ${prompt.substring(0, 150)}...`);
@@ -327,19 +328,20 @@ async function generateWithReplicate(
  * Build prompt optimized for PhotoMaker model
  * PhotoMaker requires "img" trigger word in the prompt
  */
-function buildPhotoMakerPrompt(scene: Scene, gender: 'male' | 'female'): string {
+function buildPhotoMakerPrompt(scene: Scene, gender: 'male' | 'female', genre?: string): string {
   const genderTerm = gender === 'male' ? 'man' : 'woman';
 
   // CRITICAL: Put "img" immediately after the subject for best face matching
   // Format: "a img [noun]" triggers PhotoMaker to use the reference face
   const identitySection = `A photo of a img ${genderTerm} with IDENTICAL face to the reference photo. MUST preserve: exact same eye shape, eye color, eyebrows, nose, lips, face shape, hairstyle, skin tone.`;
 
-  // Sanitize scene description to remove references to multiple people
-  // This prevents PhotoMaker from generating multiple faces
-  const sanitizedDescription = sanitizeSceneDescription(scene.description);
+  // Only sanitize scene descriptions for romance genres
+  // Business, career, travel, fitness genres don't need sanitization
+  const isRomanceGenre = genre?.toLowerCase().includes('romance');
+  const sceneDescription = isRomanceGenre ? sanitizeSceneDescription(scene.description) : scene.description;
 
   const sceneSection = `
-${sanitizedDescription}
+${sceneDescription}
 
 Setting: ${scene.environment}
 Action: ${scene.camera.action || 'standing confidently'}
