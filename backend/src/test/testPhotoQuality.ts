@@ -127,7 +127,7 @@ async function testWithSamplePhotos() {
   console.log('='.repeat(60));
 
   // Test with different types of photos (these are example URLs)
-  const testPhotos = [
+  const testPhotos: { url: string; label: string }[] = [
     // You can add test URLs here
     // { url: 'https://example.com/photo1.jpg', label: 'Clear face photo' },
     // { url: 'https://example.com/photo2.jpg', label: 'Multiple faces' },

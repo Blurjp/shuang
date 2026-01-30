@@ -153,7 +153,8 @@ export async function generatePersonalizedImage(
       };
     } catch (error) {
       const isLastAttempt = attempt === CONFIG.retry.maxAttempts;
-      console.warn(`⚠️  Replicate attempt ${attempt} failed:`, error instanceof Error ? error.message : error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn(`⚠️  Replicate attempt ${attempt} failed:`, errorMessage);
 
       if (!isLastAttempt) {
         console.log(`⏳ Waiting ${CONFIG.retry.delayMs}ms before retry...`);
@@ -184,31 +185,15 @@ export async function generatePersonalizedImage(
     };
   } catch (error) {
     recordMetrics('openai', false, Date.now() - startTime);
-    console.error('❌ All providers failed. Last error:', error);
+    let errorMessage: string;
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else {
+      errorMessage = String(error);
+    }
+    console.error('❌ All providers failed. Last error:', errorMessage);
     throw new Error(
-      `Image generation failed. Replicate error: ${error instanceof Error ? error.message : 'Unknown'}`
-    );
-  }
-  try {
-    const result = await openaiImageEditService.generateImageWithIdentity(
-      params.userPhotoUrl,
-      params.scene,
-      params.gender
-    );
-    const duration = Date.now() - startTime;
-    recordMetrics('openai', true, duration, CONFIG.costs.openai);
-
-    return {
-      imageUrl: result,
-      provider: 'openai',
-      generationTimeMs: duration,
-      costEstimate: CONFIG.costs.openai,
-    };
-  } catch (error) {
-    recordMetrics('openai', false, Date.now() - startTime);
-    console.error('❌ All providers failed. Last error:', error);
-    throw new Error(
-      `Image generation failed. Replicate error: ${error instanceof Error ? error.message : 'Unknown'}`
+      `Image generation failed. Replicate error: ${errorMessage}`
     );
   }
 }

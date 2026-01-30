@@ -661,10 +661,13 @@ function extractSceneFromStory(story: string): string {
 // Metrics and Analytics
 // ============================================
 
-const metricsStore = new Map<string, {
-  claude: { success: 0; failure: 0; totalTime: 0; };
-  openai: { success: 0; failure: 0; totalTime: 0; };
-}>();
+interface ProviderMetrics {
+  success: number;
+  failure: number;
+  totalTime: number;
+}
+
+const metricsStore = new Map<string, ProviderMetrics>();
 
 function recordMetrics(
   provider: 'claude' | 'openai',

@@ -204,11 +204,24 @@ describe('Western Story Templates Service', () => {
         'Romantic Comedy',
         'Celebrity Romance',
         'Forbidden Romance',
+        'New Adult Romance',
+        'Workplace Romance',
+        'Age Gap Romance',
+        'Second Chance Romance',
+        'Personal Growth',
+        'Business',
+        'Career',
+        'Lifestyle',
+        'Marriage of Convenience',
+        'Travel',
       ];
 
       templates.forEach((template: StoryTemplate) => {
         // All genres should contain at least one of the valid base genres
         const isValid = validGenres.some(valid => template.genre.includes(valid));
+        if (!isValid) {
+          console.log('FAILING GENRE:', template.genre, 'for template:', template.id);
+        }
         expect(isValid).toBe(true);
       });
     });

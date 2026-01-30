@@ -16,40 +16,33 @@ import {
   getUserByEmail,
   createStoryArc,
   createStoryEpisode,
+  db,
 } from '../../models/database';
+import type { EpisodeGenerationResult } from '../../services/storyArcGenerator';
 
 // Mock the storyArcGenerator to avoid actual API calls
+const mockEpisodeResult: EpisodeGenerationResult = {
+  episode: {
+    title: 'Test Episode',
+    text: 'This is a test episode content.',
+    sceneDescription: 'A test scene',
+  },
+  imageUrl: 'https://example.com/test-image.jpg',
+  storyProvider: 'claude',
+  imageProvider: 'replicate',
+  generationTimeMs: 1000,
+};
+
 jest.mock('../../services/storyArcGenerator', () => ({
   getStoryArcGenerator: jest.fn(() => ({
-    generateEpisode: jest.fn().mockResolvedValue({
-      episode: {
-        title: 'Test Episode',
-        text: 'This is a test episode content.',
-        sceneDescription: 'A test scene',
-      },
-      imageUrl: 'https://example.com/test-image.jpg',
-      storyProvider: 'claude' as const,
-      imageProvider: 'replicate' as const,
-      generationTimeMs: 1000,
-    }),
+    generateEpisode: jest.fn().mockResolvedValue(mockEpisodeResult as any),
   })),
   storyArcGenerator: {
-    generateEpisode: jest.fn().mockResolvedValue({
-      episode: {
-        title: 'Test Episode',
-        text: 'This is a test episode content.',
-        sceneDescription: 'A test scene',
-      },
-      imageUrl: 'https://example.com/test-image.jpg',
-      storyProvider: 'claude' as const,
-      imageProvider: 'replicate' as const,
-      generationTimeMs: 1000,
-    }),
+    generateEpisode: jest.fn().mockImplementation(async () => mockEpisodeResult),
   },
 }));
 
 describe('Story Arc Routes Integration Tests', () => {
-  let db: Database.Database;
   let app: express.Express;
   let testUserId: string;
   let authToken: string;
@@ -60,7 +53,7 @@ describe('Story Arc Routes Integration Tests', () => {
       email, password_hash, is_onboarded, gender, is_premium,
       preferred_genres, preferred_emotions
     ) VALUES (?, ?, 1, 'female', ?, ?, ?)
-    RETURNING id`).get(email, 'hashedpassword', isPremium ? 1 : 0, '[]', '[]') as { id: string };
+    RETURNING id`).get(email, 'hashedpassword', isPremium ?1 : 0, '[]', '[]') as { id: string };
 
     return userId.id;
   }
@@ -70,13 +63,13 @@ describe('Story Arc Routes Integration Tests', () => {
     return jwt.sign({ userId }, process.env.JWT_SECRET || 'test-secret', { expiresIn: '1h' });
   }
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // Set environment variables
     process.env.JWT_SECRET = 'test-secret-key';
     process.env.DATABASE_URL = ':memory:';
 
     // Initialize database
-    db = initializeDatabase();
+    await initializeDatabase();
 
     // Create Express app for testing
     app = express();
@@ -144,7 +137,7 @@ describe('Story Arc Routes Integration Tests', () => {
 
     it('should return active story arc when exists', async () => {
       // Create active arc
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Test Active Story',
@@ -211,7 +204,7 @@ describe('Story Arc Routes Integration Tests', () => {
 
     it('should return 400 when user already has active arc', async () => {
       // Create first arc
-      createStoryArc({
+      await createStoryArc({
         user_id: testUserId,
         story_template_id: 'template1',
         title: 'First Arc',
@@ -299,7 +292,7 @@ describe('Story Arc Routes Integration Tests', () => {
 
   describe('GET /api/arcs/:arcId', () => {
     it('should return story arc details', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Detail Test Story',
@@ -330,7 +323,7 @@ describe('Story Arc Routes Integration Tests', () => {
     it('should return 403 for arc owned by different user', async () => {
       // Create arc for different user
       const otherUserId = createTestUser('other@example.com');
-      const otherArc = createStoryArc({
+      const otherArc = await createStoryArc({
         user_id: otherUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Other User Arc',
@@ -352,7 +345,7 @@ describe('Story Arc Routes Integration Tests', () => {
     });
 
     it('should include episodes in response', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Episodes Test',
@@ -361,7 +354,7 @@ describe('Story Arc Routes Integration Tests', () => {
         emotion: 'Love',
       });
 
-      createStoryEpisode({
+      await createStoryEpisode({
         story_arc_id: arc.id,
         episode_number: 1,
         title: 'Episode 1',
@@ -383,7 +376,7 @@ describe('Story Arc Routes Integration Tests', () => {
 
   describe('GET /api/arcs/:arcId/episodes', () => {
     it('should return all episodes for arc', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Episode List Test',
@@ -392,7 +385,7 @@ describe('Story Arc Routes Integration Tests', () => {
         emotion: 'Love',
       });
 
-      createStoryEpisode({
+      await createStoryEpisode({
         story_arc_id: arc.id,
         episode_number: 1,
         title: 'Episode 1',
@@ -400,7 +393,7 @@ describe('Story Arc Routes Integration Tests', () => {
         image_url: 'https://example.com/ep1.jpg',
       });
 
-      createStoryEpisode({
+      await createStoryEpisode({
         story_arc_id: arc.id,
         episode_number: 2,
         title: 'Episode 2',
@@ -427,7 +420,7 @@ describe('Story Arc Routes Integration Tests', () => {
 
   describe('GET /api/arcs/:arcId/episodes/:episodeNumber', () => {
     it('should return full episode content', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Episode Detail Test',
@@ -436,7 +429,7 @@ describe('Story Arc Routes Integration Tests', () => {
         emotion: 'Love',
       });
 
-      createStoryEpisode({
+      await createStoryEpisode({
         story_arc_id: arc.id,
         episode_number: 1,
         title: 'Full Episode',
@@ -457,7 +450,7 @@ describe('Story Arc Routes Integration Tests', () => {
     });
 
     it('should return 404 for non-existent episode', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Missing Episode Test',
@@ -477,7 +470,7 @@ describe('Story Arc Routes Integration Tests', () => {
 
   describe('POST /api/arcs/:arcId/generate', () => {
     it('should generate new episode', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Generation Test',
@@ -503,7 +496,7 @@ describe('Story Arc Routes Integration Tests', () => {
     });
 
     it('should return 400 if episode already exists for current day', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Duplicate Test',
@@ -512,7 +505,7 @@ describe('Story Arc Routes Integration Tests', () => {
         emotion: 'Love',
       });
 
-      createStoryEpisode({
+      await createStoryEpisode({
         story_arc_id: arc.id,
         episode_number: 1,
         title: 'Already Generated',
@@ -529,7 +522,7 @@ describe('Story Arc Routes Integration Tests', () => {
     });
 
     it('should return 400 if arc is not active', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Inactive Arc',
@@ -552,7 +545,7 @@ describe('Story Arc Routes Integration Tests', () => {
 
   describe('POST /api/episodes/:episodeId/feedback', () => {
     it('should submit episode feedback', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Feedback Test',
@@ -561,7 +554,7 @@ describe('Story Arc Routes Integration Tests', () => {
         emotion: 'Love',
       });
 
-      const episode = createStoryEpisode({
+      const episode = await createStoryEpisode({
         story_arc_id: arc.id,
         episode_number: 1,
         title: 'Rate Me',
@@ -584,7 +577,7 @@ describe('Story Arc Routes Integration Tests', () => {
     });
 
     it('should return 400 for invalid rating', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Invalid Rating Test',
@@ -593,7 +586,7 @@ describe('Story Arc Routes Integration Tests', () => {
         emotion: 'Love',
       });
 
-      const episode = createStoryEpisode({
+      const episode = await createStoryEpisode({
         story_arc_id: arc.id,
         episode_number: 1,
         title: 'Invalid Rating',
@@ -614,7 +607,7 @@ describe('Story Arc Routes Integration Tests', () => {
       const ratings = ['like', 'neutral', 'dislike'];
 
       for (const rating of ratings) {
-        const arc = createStoryArc({
+        const arc = await createStoryArc({
           user_id: testUserId,
           story_template_id: 'sweet_revenge_shattered_vows',
           title: `Rating Test ${rating}`,
@@ -623,7 +616,7 @@ describe('Story Arc Routes Integration Tests', () => {
           emotion: 'Love',
         });
 
-        const episode = createStoryEpisode({
+        const episode = await createStoryEpisode({
           story_arc_id: arc.id,
           episode_number: 1,
           title: `Rating ${rating}`,
@@ -657,7 +650,7 @@ describe('Story Arc Routes Integration Tests', () => {
     });
 
     it('should allow premium users unlimited generations', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: premiumUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Premium User Arc',
@@ -680,7 +673,7 @@ describe('Story Arc Routes Integration Tests', () => {
 
   describe('Daily Limit for Free Users', () => {
     it('should enforce daily generation limit for free users', async () => {
-      const arc = createStoryArc({
+      const arc = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'sweet_revenge_shattered_vows',
         title: 'Daily Limit Test',
@@ -695,7 +688,7 @@ describe('Story Arc Routes Integration Tests', () => {
         .set('Authorization', `Bearer ${authToken}`);
 
       // Try to generate another episode on a different arc (same day, same user)
-      const arc2 = createStoryArc({
+      const arc2 = await createStoryArc({
         user_id: testUserId,
         story_template_id: 'fake_dating_office_compromise',
         title: 'Second Arc',

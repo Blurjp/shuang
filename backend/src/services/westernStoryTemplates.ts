@@ -756,7 +756,7 @@ const NON_ROMANCE_TEMPLATES: StoryTemplate[] = [
   // ============================================
   {
     id: 'fitness_transformation',
-    title: '30-Day Transformation',
+    title: 'Thirty-Day Transformation',
     genre: 'Personal Growth',
     emotion: 'Empowerment',
     themeKeywords: ['fitness', 'weight loss', 'strength training', 'nutrition', 'mental toughness', 'transformation'],

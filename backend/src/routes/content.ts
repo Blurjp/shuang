@@ -207,7 +207,7 @@ router.post('/generate', async (req: AuthRequest, res: Response) => {
       content = await updateDailyContent(existingContent.id, {
         text,
         image_url: imageUrl,
-        story_provider: storyResult.provider,
+        story_provider: storyResult.provider === 'fallback' ? null : storyResult.provider,
         image_provider: imageResult.provider,
         story_generation_time_ms: storyResult.generationTimeMs,
         image_generation_time_ms: imageResult.generationTimeMs,
@@ -224,7 +224,7 @@ router.post('/generate', async (req: AuthRequest, res: Response) => {
         text,
         image_url: imageUrl,
         date: today,
-        story_provider: storyResult.provider,
+        story_provider: storyResult.provider === 'fallback' ? null : storyResult.provider,
         image_provider: imageResult.provider,
         story_generation_time_ms: storyResult.generationTimeMs,
         image_generation_time_ms: imageResult.generationTimeMs,
